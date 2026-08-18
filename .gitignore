@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 業務用の図面データは公開リポジトリに含めない
+# (公開したい図がある場合は個別に git add -f してください)
+*.mdpf
+*.mdrw
+YRC1000*
+比較_*.png
+差分マップ.png
+Untitled*.svg

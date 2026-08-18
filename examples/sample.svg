@@ -1,0 +1,345 @@
+<svg xmlns = 'http://www.w3.org/2000/svg' width = '130mm' height = '48mm' viewBox = '0 0 130 48'>
+<!-- Master Definitions -->
+<style>
+text { white-space: pre; }
+.sfont-1 { font-style:normal; font-weight:400; font-size:3.5px; font-family:ＭＳ ゴシック; }
+.sfont-2 { font-style:normal; font-weight:400; font-size:2.8px; font-family:ＭＳ ゴシック; }
+.sfont-3 { font-style:normal; font-weight:400; font-size:2.8px; font-family:Symbol; }
+.sfont-4 { font-style:normal; font-weight:400; font-size:2.8px; font-family:ＭＳ Ｐゴシック; }
+</style>
+<defs>
+</defs>
+<!-- 矩形部品 ID=1 -->
+<g id='Group-1'>
+<defs>
+<symbol id='ObjectBody-1'>
+<path d='M 69 11 C 69 11 119 11 119 11 C 119 11 119 29 119 29 C 119 29 69 29 69 29 C 69 29 69 11 69 11' />
+</symbol>
+</defs>
+<use href='#ObjectBody-1' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='1.5 1.5' shape-rendering='crispEdges' />
+</g>
+<!-- End of 矩形部品 ID=1 -->
+
+<!-- 矩形部品 ID=2 -->
+<g id='Group-2'>
+<defs>
+<symbol id='ObjectBody-2'>
+<path d='M 69 7 C 69 7 82 7 82 7 C 82 7 82 10.5 82 10.5 C 82 10.5 69 10.5 69 10.5 C 69 10.5 69 7 69 7' />
+</symbol>
+</defs>
+<text class='sfont-4' fill='#000000ff'><tspan x='69.5' y='10'>制御対象</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=2 -->
+
+<!-- 矩形部品 ID=3 -->
+<g id='Group-3'>
+<defs>
+<symbol id='ObjectBody-3'>
+<path d='M 34 15 C 34 15 52 15 52 15 C 52 15 52 25 52 25 C 52 25 34 25 34 25 C 34 25 34 15 34 15' />
+</symbol>
+</defs>
+<use href='#ObjectBody-3' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<text class='sfont-2' fill='#000000ff'><tspan x='40.2' y='19.6'>C(s)</tspan></text>
+<text class='sfont-2' fill='#000000ff'><tspan x='36.7' y='22.4'>Kp + Ki/s</tspan></text>
+<use href='#ObjectBody-3' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 矩形部品 ID=3 -->
+
+<!-- 矩形部品 ID=4 -->
+<g id='Group-4'>
+<defs>
+<symbol id='ObjectBody-4'>
+<path d='M 72 15 C 72 15 94 15 94 15 C 94 15 94 25 94 25 C 94 25 72 25 72 25 C 72 25 72 15 72 15' />
+</symbol>
+</defs>
+<use href='#ObjectBody-4' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<text class='sfont-2' fill='#000000ff'><tspan x='80.2' y='19.6'>G(s)</tspan></text>
+<text class='sfont-2' fill='#000000ff'><tspan x='76' y='22.4'>K / (<tspan class='sfont-3'>t</tspan>s+1)</tspan></text>
+<use href='#ObjectBody-4' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 矩形部品 ID=4 -->
+
+<!-- 矩形部品 ID=5 -->
+<g id='Group-5'>
+<defs>
+<symbol id='ObjectBody-5'>
+<path d='M 102 15 C 102 15 116 15 116 15 C 116 15 116 25 116 25 C 116 25 102 25 102 25 C 102 25 102 15 102 15' />
+</symbol>
+</defs>
+<use href='#ObjectBody-5' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<text class='sfont-2' fill='#000000ff'><tspan x='104.9' y='21'>e<tspan font-size='65%' baseline-shift='0.96'>-Ls</tspan></tspan></text>
+<use href='#ObjectBody-5' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 矩形部品 ID=5 -->
+
+<!-- 矩形部品 ID=6 -->
+<g id='Group-6'>
+<defs>
+<symbol id='ObjectBody-6'>
+<path d='M 78 34 C 78 34 98 34 98 34 C 98 34 98 42 98 42 C 98 42 78 42 78 42 C 78 42 78 34 78 34' />
+</symbol>
+</defs>
+<use href='#ObjectBody-6' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<text class='sfont-2' fill='#000000ff'><tspan x='85.2' y='39'>H(s)</tspan></text>
+<use href='#ObjectBody-6' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 矩形部品 ID=6 -->
+
+<!-- 円弧部品 ID=7 -->
+<g id='Group-7'>
+<defs>
+<symbol id='ObjectBody-7'>
+<path d='M 24 20 C 24 21.104 23.104 22 22 22 C 20.896 22 20 21.104 20 20 C 20 18.896 20.896 18 22 18 C 23.104 18 24 18.896 24 20' />
+</symbol>
+</defs>
+<use href='#ObjectBody-7' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<use href='#ObjectBody-7' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 円弧部品 ID=7 -->
+
+<!-- 円弧部品 ID=8 -->
+<g id='Group-8'>
+<defs>
+<symbol id='ObjectBody-8'>
+<path d='M 64 20 C 64 21.104 63.104 22 62 22 C 60.896 22 60 21.104 60 20 C 60 18.896 60.896 18 62 18 C 63.104 18 64 18.896 64 20' />
+</symbol>
+</defs>
+<use href='#ObjectBody-8' fill='#ffffffff' stroke='transparent' shape-rendering='crispEdges' />
+<use href='#ObjectBody-8' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+</g>
+<!-- End of 円弧部品 ID=8 -->
+
+<!-- 円弧部品 ID=9 -->
+<g id='Group-9'>
+<defs>
+<symbol id='ObjectBody-9'>
+<path d='M 120.4 20 C 120.4 20.221 120.221 20.4 120 20.4 C 119.779 20.4 119.6 20.221 119.6 20 C 119.6 19.779 119.779 19.6 120 19.6 C 120.221 19.6 120.4 19.779 120.4 20' />
+</symbol>
+</defs>
+<use href='#ObjectBody-9' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 円弧部品 ID=9 -->
+
+<!-- 多角線部品 ID=10 -->
+<g id='Group-10'>
+<defs>
+<symbol id='ObjectBody-10'>
+<path d='M 9 20 C 9 20 17.5 20 17.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-10'>
+<path d='M 17.5 19.17 C 17.5 19.17 20 20 20 20 C 20 20 17.5 20.83 17.5 20.83 C 17.5 20.83 17.5 19.17 17.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-10' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-10' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=10 -->
+
+<!-- 多角線部品 ID=11 -->
+<g id='Group-11'>
+<defs>
+<symbol id='ObjectBody-11'>
+<path d='M 24 20 C 24 20 31.5 20 31.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-11'>
+<path d='M 31.5 19.17 C 31.5 19.17 34 20 34 20 C 34 20 31.5 20.83 31.5 20.83 C 31.5 20.83 31.5 19.17 31.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-11' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-11' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=11 -->
+
+<!-- 多角線部品 ID=12 -->
+<g id='Group-12'>
+<defs>
+<symbol id='ObjectBody-12'>
+<path d='M 52 20 C 52 20 57.5 20 57.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-12'>
+<path d='M 57.5 19.17 C 57.5 19.17 60 20 60 20 C 60 20 57.5 20.83 57.5 20.83 C 57.5 20.83 57.5 19.17 57.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-12' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-12' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=12 -->
+
+<!-- 多角線部品 ID=13 -->
+<g id='Group-13'>
+<defs>
+<symbol id='ObjectBody-13'>
+<path d='M 62 8 C 62 8 62 15.5 62 15.5' />
+</symbol>
+<symbol id='ObjectBackArrow-13'>
+<path d='M 61.17 15.5 C 61.17 15.5 62 18 62 18 C 62 18 62.83 15.5 62.83 15.5 C 62.83 15.5 61.17 15.5 61.17 15.5' />
+</symbol>
+</defs>
+<use href='#ObjectBody-13' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-13' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=13 -->
+
+<!-- 多角線部品 ID=14 -->
+<g id='Group-14'>
+<defs>
+<symbol id='ObjectBody-14'>
+<path d='M 64 20 C 64 20 69.5 20 69.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-14'>
+<path d='M 69.5 19.17 C 69.5 19.17 72 20 72 20 C 72 20 69.5 20.83 69.5 20.83 C 69.5 20.83 69.5 19.17 69.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-14' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-14' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=14 -->
+
+<!-- 多角線部品 ID=15 -->
+<g id='Group-15'>
+<defs>
+<symbol id='ObjectBody-15'>
+<path d='M 94 20 C 94 20 99.5 20 99.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-15'>
+<path d='M 99.5 19.17 C 99.5 19.17 102 20 102 20 C 102 20 99.5 20.83 99.5 20.83 C 99.5 20.83 99.5 19.17 99.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-15' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-15' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=15 -->
+
+<!-- 多角線部品 ID=16 -->
+<g id='Group-16'>
+<defs>
+<symbol id='ObjectBody-16'>
+<path d='M 116 20 C 116 20 123.5 20 123.5 20' />
+</symbol>
+<symbol id='ObjectBackArrow-16'>
+<path d='M 123.5 19.17 C 123.5 19.17 126 20 126 20 C 126 20 123.5 20.83 123.5 20.83 C 123.5 20.83 123.5 19.17 123.5 19.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-16' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-16' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=16 -->
+
+<!-- 多角線部品 ID=17 -->
+<g id='Group-17'>
+<defs>
+<symbol id='ObjectBody-17'>
+<path d='M 120 20 C 120 20 120 38 120 38 C 120 38 100.5 38 100.5 38' />
+</symbol>
+<symbol id='ObjectBackArrow-17'>
+<path d='M 100.5 37.17 C 100.5 37.17 98 38 98 38 C 98 38 100.5 38.83 100.5 38.83 C 100.5 38.83 100.5 37.17 100.5 37.17' />
+</symbol>
+</defs>
+<use href='#ObjectBody-17' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-17' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=17 -->
+
+<!-- 多角線部品 ID=18 -->
+<g id='Group-18'>
+<defs>
+<symbol id='ObjectBody-18'>
+<path d='M 78 38 C 78 38 22 38 22 38 C 22 38 22 24.5 22 24.5' />
+</symbol>
+<symbol id='ObjectBackArrow-18'>
+<path d='M 21.17 24.5 C 21.17 24.5 22 22 22 22 C 22 22 22.83 24.5 22.83 24.5 C 22.83 24.5 21.17 24.5 21.17 24.5' />
+</symbol>
+</defs>
+<use href='#ObjectBody-18' fill='none' stroke='#000000ff' stroke-width='0.25' stroke-linecap='round' stroke-linejoin='round' shape-rendering='crispEdges' />
+<use href='#ObjectBackArrow-18' fill='#000000ff' stroke='transparent' shape-rendering='crispEdges' />
+</g>
+<!-- End of 多角線部品 ID=18 -->
+
+<!-- 矩形部品 ID=19 -->
+<g id='Group-19'>
+<defs>
+<symbol id='ObjectBody-19'>
+<path d='M 9 15.5 C 9 15.5 12 15.5 12 15.5 C 12 15.5 12 19 12 19 C 12 19 9 19 9 19 C 9 19 9 15.5 9 15.5' />
+</symbol>
+</defs>
+<text class='sfont-2' fill='#000000ff'><tspan x='9.6' y='18.6'>r</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=19 -->
+
+<!-- 矩形部品 ID=20 -->
+<g id='Group-20'>
+<defs>
+<symbol id='ObjectBody-20'>
+<path d='M 26.5 15.5 C 26.5 15.5 29.5 15.5 29.5 15.5 C 29.5 15.5 29.5 19 29.5 19 C 29.5 19 26.5 19 26.5 19 C 26.5 19 26.5 15.5 26.5 15.5' />
+</symbol>
+</defs>
+<text class='sfont-2' fill='#000000ff'><tspan x='27.1' y='18.6'>e</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=20 -->
+
+<!-- 矩形部品 ID=21 -->
+<g id='Group-21'>
+<defs>
+<symbol id='ObjectBody-21'>
+<path d='M 53.5 15.5 C 53.5 15.5 56.5 15.5 56.5 15.5 C 56.5 15.5 56.5 19 56.5 19 C 56.5 19 53.5 19 53.5 19 C 53.5 19 53.5 15.5 53.5 15.5' />
+</symbol>
+</defs>
+<text class='sfont-2' fill='#000000ff'><tspan x='54.1' y='18.6'>u</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=21 -->
+
+<!-- 矩形部品 ID=22 -->
+<g id='Group-22'>
+<defs>
+<symbol id='ObjectBody-22'>
+<path d='M 63 6.5 C 63 6.5 66 6.5 66 6.5 C 66 6.5 66 10 66 10 C 66 10 63 10 63 10 C 63 10 63 6.5 63 6.5' />
+</symbol>
+</defs>
+<text class='sfont-2' fill='#000000ff'><tspan x='63.6' y='9.6'>d</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=22 -->
+
+<!-- 矩形部品 ID=23 -->
+<g id='Group-23'>
+<defs>
+<symbol id='ObjectBody-23'>
+<path d='M 116 15.5 C 116 15.5 119 15.5 119 15.5 C 119 15.5 119 19 119 19 C 119 19 116 19 116 19 C 116 19 116 15.5 116 15.5' />
+</symbol>
+</defs>
+<text class='sfont-2' fill='#000000ff'><tspan x='116.6' y='18.6'>y</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=23 -->
+
+<!-- 矩形部品 ID=24 -->
+<g id='Group-24'>
+<defs>
+<symbol id='ObjectBody-24'>
+<path d='M 17.5 14.5 C 17.5 14.5 21 14.5 21 14.5 C 21 14.5 21 18 21 18 C 21 18 17.5 18 17.5 18 C 17.5 18 17.5 14.5 17.5 14.5' />
+</symbol>
+</defs>
+<text class='sfont-1' fill='#000000ff'><tspan x='17.9' y='17.6'>+</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=24 -->
+
+<!-- 矩形部品 ID=25 -->
+<g id='Group-25'>
+<defs>
+<symbol id='ObjectBody-25'>
+<path d='M 17.5 22.5 C 17.5 22.5 21 22.5 21 22.5 C 21 22.5 21 26 21 26 C 21 26 17.5 26 17.5 26 C 17.5 26 17.5 22.5 17.5 22.5' />
+</symbol>
+</defs>
+<text class='sfont-1' fill='#000000ff'><tspan x='17.9' y='25.6'>-</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=25 -->
+
+<!-- 矩形部品 ID=26 -->
+<g id='Group-26'>
+<defs>
+<symbol id='ObjectBody-26'>
+<path d='M 63.5 14 C 63.5 14 67 14 67 14 C 67 14 67 17.5 67 17.5 C 67 17.5 63.5 17.5 63.5 17.5 C 63.5 17.5 63.5 14 63.5 14' />
+</symbol>
+</defs>
+<text class='sfont-1' fill='#000000ff'><tspan x='63.9' y='17.1'>+</tspan></text>
+</g>
+<!-- End of 矩形部品 ID=26 -->
+</svg>
