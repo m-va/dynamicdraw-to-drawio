@@ -63,6 +63,33 @@ NUM = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
 LF = chr(10)
 
 
+FRAC = chr(92) + 'frac'
+
+
+def em_height(latex):
+    """LaTeX を組んだときの高さの見込み (文字サイズの何倍か)。"""
+    depth = level = 0
+    i = 0
+    while True:
+        i = latex.find(FRAC, i)
+        if i < 0:
+            break
+        level = 1
+        j, brace, seen = i + 5, 0, 0
+        while j < len(latex) and seen < 2:      # 分子・分母の中を見る
+            if latex[j] == '{':
+                brace += 1
+            elif latex[j] == '}':
+                brace -= 1
+                if brace == 0:
+                    seen += 1
+            j += 1
+        level += em_height(latex[i + 5:j]) / 1.2 - 1.6 / 1.2
+        depth = max(depth, level)
+        i = j
+    return 1.6 + 1.2 * depth
+
+
 def mxfile(diagrams):
     """複数ページ分の <diagram> をまとめて 1 つの .drawio にする。"""
     return LF.join(['<mxfile host="svg2drawio" type="device">'] +
@@ -531,15 +558,16 @@ class Converter:
         self.cells.append(cell)
         self.stats['edge'] += 1
 
-    def ole_font(self, height=None):
+    def ole_font(self, height=None, latex=''):
         """数式の文字サイズ (px)。
 
-        MathJax は 1 行の数式を文字サイズの約 1.6 倍の高さに組むので、
-        --ole-size (数式の短辺 mm) と辻褄が合うように逆算する。
+        MathJax は 1 行の数式を文字サイズの約 1.6 倍の高さに組む。分数が入ると
+        その分だけ背が高くなるので、入れ子の深さから見込みの高さ (em) を出して
+        数式の実寸 (mm) から文字サイズを逆算する。
         """
         if OLE_FONT:
             return round(OLE_FONT, 1)
-        return round((height or OLE_MM) * MM_TO_PX / 1.6, 1)
+        return round((height or OLE_MM) * MM_TO_PX / em_height(latex), 1)
 
     def ole_parts(self):
         """[(部品ID, x, y, 縦横比)] を返す。mdpf の数式と突き合わせるのに使う。"""
@@ -616,7 +644,7 @@ class Converter:
             style = ['text', 'html=1', 'fillColor=none', 'strokeColor=none',
                      'whiteSpace=nowrap', 'overflow=visible', 'spacing=0',
                      'align=center', 'verticalAlign=middle',
-                     'fontSize=%g' % self.ole_font(h)]
+                     'fontSize=%g' % self.ole_font(h, latex)]
             self.add_shape(self.prefix + 'o%s' % gid, 'ole_tex', (x, y, w, h), style,
                            '$$' + escape(latex) + '$$', is_shape=False)
             self.math = True
