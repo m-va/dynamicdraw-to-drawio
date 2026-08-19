@@ -140,7 +140,32 @@ why the equations look like they vanished. The **PNG data itself is intact**, ho
 converter restores each OLE part as an embedded image, using the recorded position and the PNG's
 aspect ratio.
 
-### Restoring them as real math (draw.io math typesetting)
+### Pass the .mdpf and the maths convert themselves (recommended)
+
+The `.mdpf` still contains the **original equation data (MathType MTEF)** and the **bounding
+rectangle of every part in millimetres**. Hand it the mdpf and equations are converted to LaTeX
+automatically, at their true size:
+
+```bash
+python svg2drawio.py drawing_1.svg --mdpf drawing.mdpf
+```
+
+The SVG is exported as a crop of the drawing, so the two coordinate systems are offset — the
+converter recovers the offset by **voting over pairs whose aspect ratios agree**, so you never have
+to say which sheet an SVG came from.
+
+### Converting many files at once
+
+Give it a folder and it pairs `xxx.mdpf` with `xxx_1.svg, xxx_2.svg, …` (or `xxx.svg`) and writes
+**`xxx.drawio` with one page per sheet**:
+
+```bash
+python svg2drawio.py path/to/drawings/
+```
+
+With no argument at all it processes the current folder.
+
+### Assigning LaTeX by hand (when you have no .mdpf)
 
 If you want LaTeX instead of a picture, it takes three steps. The SVG only carries a rasterised PNG,
 so the structure of the formula has to be **read off the image**:
@@ -163,7 +188,7 @@ them on open (the manual switch is **View > Math Typesetting**). JSON (`{"52": "
 
 ### Sizing
 
-The original SVG does not record the display size of an OLE part, so **the size is a guess**.
+With a `.mdpf` the true size is used. From the SVG alone the display size is lost, so **it is a guess**.
 `--ole-size` (height of one line of maths, in mm, default 4.5) scales everything, and `--ole-font`
 (px) sets just the font size in math mode. Individual items are easy to nudge in draw.io afterwards.
 
@@ -191,10 +216,10 @@ What remains is almost entirely text anti-aliasing (sub-pixel bleed).
   coordinates rather than attached.
 - Arrowheads are replaced by draw.io's standard marker (`blockThin`), so unusual arrow shapes will look
   different
-- **The display size of an OLE part cannot be recovered** — it is not in the SVG, so `--ole-size`
-  provides an estimate
-- LaTeX cannot be generated automatically from an OLE part (only a rasterised PNG survives in the
-  SVG); you have to read the dumped images and write the mapping file
+- **From an SVG alone**, the display size of an OLE part cannot be recovered (`--ole-size` provides
+  an estimate) and LaTeX cannot be generated automatically. Passing the `.mdpf` solves both
+- MTEF → LaTeX covers the everyday constructs (fractions, sub/superscripts, roots, fences, Greek
+  letters, integrals, sums). Equations using matrices or unsupported glyphs fall back to images
 - Only four part types are handled: rectangle, arc, polyline and OLE. Anything else is reported as
   "not converted" (`変換不能`) in the summary line.
 

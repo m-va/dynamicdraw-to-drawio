@@ -15,6 +15,7 @@ usage: python svg2drawio.py input.svg [-o output.drawio]
 """
 import argparse
 import base64
+import os
 import math
 import re
 import struct
@@ -59,6 +60,13 @@ PART_KINDS = (
 )
 
 NUM = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
+LF = chr(10)
+
+
+def mxfile(diagrams):
+    """複数ページ分の <diagram> をまとめて 1 つの .drawio にする。"""
+    return LF.join(['<mxfile host="svg2drawio" type="device">'] +
+                   list(diagrams) + ['</mxfile>', ''])
 
 
 def load_latex_map(path):
@@ -233,6 +241,8 @@ class Converter:
         self.ole_images = dict(re.findall(
             r"<symbol id='(OleImage-[^']+)'>\s*<image[^>]*base64,([^']+)'", svg))
         self.cells, self.shapes = [], []
+        self.prefix = ''                   # 複数ページ時に ID が衝突しないように
+        self.equations = {}                # {部品ID: mdpf から読んだ数式}
         self.math = False                  # LaTeX を出したら draw.io の数式組版を有効にする
         self.stats = {'rect': 0, 'ellipse': 0, 'edge': 0, 'text': 0, 'label': 0,
                       'connected': 0, 'guessed': 0, 'ole': 0, 'ole_tex': 0,
@@ -453,9 +463,9 @@ class Converter:
                      align, 'verticalAlign=middle'] + \
                     [s for s in style if s.split('=')[0] in keep]
             self.stats['label'] -= 1
-            self.add_shape('t%s' % gid, 'text', geo, style, label, is_shape=False)
+            self.add_shape(self.prefix + 't%s' % gid, 'text', geo, style, label, is_shape=False)
             return
-        self.add_shape('n%s' % gid, kind, geo, style, label)
+        self.add_shape(self.prefix + 'n%s' % gid, kind, geo, style, label)
 
     def do_edge(self, gid, body):
         uses = [attrs(u) for u in re.findall(r'<use\b[^>]*>', body)]
@@ -510,7 +520,7 @@ class Converter:
             else:
                 style.append('%sArrow=none' % key)
 
-        cell = {'id': 'e%s' % gid, 'style': ';'.join(style), 'value': '',
+        cell = {'id': self.prefix + 'e%s' % gid, 'style': ';'.join(style), 'value': '',
                 'edge': True, 'src': pts[0], 'tgt': pts[-1], 'pts': pts[1:-1]}
         tinfo = self.group_text(body)
         if tinfo:
@@ -521,7 +531,7 @@ class Converter:
         self.cells.append(cell)
         self.stats['edge'] += 1
 
-    def ole_font(self):
+    def ole_font(self, height=None):
         """数式の文字サイズ (px)。
 
         MathJax は 1 行の数式を文字サイズの約 1.6 倍の高さに組むので、
@@ -529,7 +539,26 @@ class Converter:
         """
         if OLE_FONT:
             return round(OLE_FONT, 1)
-        return round(OLE_MM * MM_TO_PX / 1.6, 1)
+        return round((height or OLE_MM) * MM_TO_PX / 1.6, 1)
+
+    def ole_parts(self):
+        """[(部品ID, x, y, 縦横比)] を返す。mdpf の数式と突き合わせるのに使う。"""
+        out = []
+        for m in re.finditer(r'<!-- [^<>]+? ID=(\d+) -->(.*?)<!-- End of', self.svg, re.S):
+            gid, body = m.group(1), m.group(2)
+            href = re.search(r"href='#(OleImage-[^']+)'", body)
+            pos = re.search(r'translate\(\s*([-\d.]+)[\s,]+([-\d.]+)\s*\)', body)
+            b64 = self.ole_images.get(href.group(1)) if href else None
+            if not b64 or not pos:
+                continue
+            try:
+                raw = base64.b64decode(b64)
+                pw, ph = struct.unpack('>II', raw[16:24])
+            except Exception:
+                continue
+            if pw and ph:
+                out.append((gid, float(pos.group(1)), float(pos.group(2)), pw / ph))
+        return out
 
     def dump_ole(self, outdir):
         """OLE 部品の PNG を outdir に書き出す (中身を確認して LaTeX に起こす用)。"""
@@ -556,7 +585,8 @@ class Converter:
         大きさゼロで表示されない。PNG のデータと左上座標・縦横比は残っているので、
         短辺を OLE_MM (mm) として復元する。
         """
-        latex = OLE_LATEX.get(gid)
+        eq = self.equations.get(gid)
+        latex = OLE_LATEX.get(gid) or (eq['latex'] if eq and eq['ok'] else None)
         href = re.search(r"href='#(OleImage-[^']+)'", body)
         pos = re.search(r'translate\(\s*([-\d.]+)[\s,]+([-\d.]+)\s*\)', body)
         b64 = self.ole_images.get(href.group(1)) if href else None
@@ -573,7 +603,10 @@ class Converter:
             self.stats['skipped'] += 1
             return
         x, y = float(pos.group(1)), float(pos.group(2))
-        if pw >= ph:                       # 短辺を OLE_MM にして縦横比を保つ
+        if eq:                             # mdpf に本当の大きさが入っていた
+            L, T, R, B = eq['rect']
+            w, h = R - L, B - T
+        elif pw >= ph:                     # 短辺を OLE_MM にして縦横比を保つ
             h = OLE_MM
             w = OLE_MM * pw / ph
         else:
@@ -583,15 +616,15 @@ class Converter:
             style = ['text', 'html=1', 'fillColor=none', 'strokeColor=none',
                      'whiteSpace=nowrap', 'overflow=visible', 'spacing=0',
                      'align=center', 'verticalAlign=middle',
-                     'fontSize=%g' % self.ole_font()]
-            self.add_shape('o%s' % gid, 'ole_tex', (x, y, w, h), style,
+                     'fontSize=%g' % self.ole_font(h)]
+            self.add_shape(self.prefix + 'o%s' % gid, 'ole_tex', (x, y, w, h), style,
                            '$$' + escape(latex) + '$$', is_shape=False)
             self.math = True
             return
         style = ['shape=image', 'imageAspect=1', 'aspect=fixed', 'noLabel=1',
                  'verticalLabelPosition=bottom', 'verticalAlign=top',
                  'image=data:image/png,' + b64]
-        self.add_shape('o%s' % gid, 'ole', (x, y, w, h), style, '', is_shape=False)
+        self.add_shape(self.prefix + 'o%s' % gid, 'ole', (x, y, w, h), style, '', is_shape=False)
 
     def connect_edges(self):
         """線の端点が図形の縁に乗っていれば source/target として接続する。"""
@@ -676,10 +709,12 @@ class Converter:
         return self.cells
 
     def to_xml(self, name='Page-1'):
+        return mxfile([self.diagram_xml(name, 1)])
+
+    def diagram_xml(self, name='Page-1', page=1):
         m = re.search(r"viewBox\s*=\s*'([^']+)'", self.svg)
         vb = [float(v) for v in NUM.findall(m.group(1))] if m else [0, 0, 297, 210]
-        out = ['<mxfile host="svg2drawio" type="device">',
-               '  <diagram name=%s id="page1">' % quoteattr(name),
+        out = ['  <diagram name=%s id="page%d">' % (quoteattr(name), page),
                '    <mxGraphModel dx="1422" dy="798" grid="1" gridSize="10" guides="1" '
                'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" '
                'pageWidth="%d" pageHeight="%d" math="%d" shadow="0">'
@@ -716,64 +751,148 @@ class Converter:
                     out.append('            </Array>')
                 out.append('          </mxGeometry>')
                 out.append('        </mxCell>')
-        out += ['      </root>', '    </mxGraphModel>', '  </diagram>', '</mxfile>', '']
+        out += ['      </root>', '    </mxGraphModel>', '  </diagram>']
         return '\n'.join(out)
+
+
+def collect_jobs(paths):
+    """入力パスから「1つの .drawio にまとめる仕事」の一覧を作る。
+
+    xxx.mdpf は xxx_1.svg, xxx_2.svg, ... (無ければ xxx.svg) と対になり、
+    xxx.drawio に複数ページとして出力する。対になる mdpf が無い SVG は単独で変換する。
+    """
+    import glob
+    svgs, mdpfs = [], {}
+    for p in paths:
+        if os.path.isdir(p):
+            svgs += sorted(glob.glob(os.path.join(p, '*.svg')))
+            for m in glob.glob(os.path.join(p, '*.mdpf')):
+                mdpfs[os.path.splitext(m)[0]] = m
+        elif p.lower().endswith('.mdpf'):
+            mdpfs[os.path.splitext(p)[0]] = p
+        else:
+            svgs.append(p)
+    for sv in svgs:                        # SVG と同じ場所の mdpf も拾う
+        base = re.sub(r'_\d+$', '', os.path.splitext(sv)[0])
+        if base not in mdpfs and os.path.exists(base + '.mdpf'):
+            mdpfs[base] = base + '.mdpf'
+
+    groups = {}
+    for sv in svgs:
+        stem = os.path.splitext(sv)[0]
+        m = re.match(r'(.*)_(\d+)$', stem)
+        base, sheet = (m.group(1), int(m.group(2))) if m else (stem, 1)
+        if m and base not in mdpfs and not os.path.exists(base + '.mdpf'):
+            base, sheet = stem, 1          # xxx_1.svg でも相方が無ければ単独扱い
+        groups.setdefault(base, []).append((sheet, sv))
+    jobs = []
+    for base in sorted(groups):
+        sheets = [sv for _n, sv in sorted(groups[base])]
+        jobs.append({'base': base, 'svgs': sheets, 'mdpf': mdpfs.get(base)})
+    return jobs
+
+
+def convert_job(job, out=None):
+    """1つの .drawio を書き出す。戻り値は集計用の統計。"""
+    equations = []
+    if job['mdpf']:
+        try:
+            import mdpf as mdpf_reader
+            equations = mdpf_reader.read_equations(job['mdpf'])
+            print('%s: 数式 %d 個を読み込みました' % (job['mdpf'], len(equations)))
+        except Exception as e:
+            print('%s を読めませんでした (%s)。画像として復元します' % (job['mdpf'], e))
+    pages, total = [], {}
+    for n, path in enumerate(job['svgs'], 1):
+        with open(path, encoding='utf-8') as f:
+            conv = Converter(f.read())
+        conv.prefix = 'p%d-' % n
+        if equations:
+            import mdpf as mdpf_reader
+            matched = mdpf_reader.match_to_svg(equations, conv.ole_parts())
+            conv.equations = matched
+        conv.run()
+        pages.append(conv.diagram_xml(os.path.basename(os.path.splitext(path)[0]), n))
+        print('  %s' % path)
+        report(conv.stats, indent='    ')
+        for k, v in conv.stats.items():
+            total[k] = total.get(k, 0) + v
+    dest = out or job['base'] + '.drawio'
+    with open(dest, 'w', encoding='utf-8') as f:
+        f.write(mxfile(pages))
+    print('  -> %s (%d ページ)' % (dest, len(pages)))
+    return total
+
+
+def report(st, indent='  '):
+    print(indent + '矩形 %(rect)d / 円弧 %(ellipse)d / 線 %(edge)d (端点接続 %(connected)d) / '
+          'テキスト単体 %(text)d / 図形内ラベル %(label)d / 変換不能 %(skipped)d' % st)
+    if st.get('ole_tex'):
+        print(indent + 'OLE部品 %(ole_tex)d 個を $$...$$ の数式として出力' % st)
+    if st.get('ole'):
+        print(indent + 'OLE部品 %(ole)d 個は埋め込み画像 '
+              '(mdpf を渡すか --ole-latex を使うと数式にできます)' % st)
+    if st.get('guessed'):
+        print(indent + '※ 部品名から種類が分からず形から推定: %(guessed)d' % st)
 
 
 def main():
     global OLE_MM
     global OLE_FONT
     global OLE_LATEX
-    ap = argparse.ArgumentParser(description='Dynamic Draw SVG -> draw.io 変換')
-    ap.add_argument('svg')
-    ap.add_argument('-o', '--out')
+    ap = argparse.ArgumentParser(
+        description='Dynamic Draw の SVG を draw.io 形式に変換する',
+        epilog='パスにはファイルもフォルダも指定できます。フォルダを渡すと、その中の '
+               'xxx.mdpf と xxx_1.svg, xxx_2.svg ... を対応づけて xxx.drawio '
+               '(シートごとのページ) にまとめます。')
+    ap.add_argument('path', nargs='*', default=['.'],
+                    help='SVG / mdpf / フォルダ (既定: カレントフォルダ)')
+    ap.add_argument('-o', '--out', help='出力先 (入力が1つのときのみ)')
+    ap.add_argument('--mdpf', help='使用する mdpf を明示指定する')
     ap.add_argument('--ole-size', type=float, default=OLE_MM, metavar='MM',
                     help='OLE 部品 (数式など) の短辺の長さ (mm, 既定 %(default)s)。'
-                         'Dynamic Draw の SVG 出力には OLE の表示サイズが入らないため、'
-                         'この値と PNG の縦横比から大きさを決める')
+                         'mdpf から実寸が読めた場合はそちらを使う')
     ap.add_argument('--ole-font', type=float, metavar='PX',
-                    help='--ole-latex で出す数式の文字サイズ (px)。'
-                         '既定は図中の最大文字サイズ')
+                    help='数式の文字サイズ (px)。既定は数式の高さから逆算')
     ap.add_argument('--dump-ole', metavar='DIR',
-                    help='OLE 部品の PNG を DIR に書き出して終了する'
-                         '(中身を見て LaTeX に起こすため)')
-    ap.add_argument('--ole-latex', metavar='JSON',
-                    help='OLE部品ID と LaTeX の対応表 (JSON または「52 = x_{ref}」形式の'
-                         'テキスト) を読み込み、その部品を $$...$$ の数式テキストとして'
-                         '出力する (draw.io の数式組版を有効化)')
+                    help='OLE 部品の PNG を DIR に書き出して終了する')
+    ap.add_argument('--ole-latex', metavar='FILE',
+                    help='部品ID と LaTeX の対応表 (JSON または「52 = x_{ref}」形式)')
     args = ap.parse_args()
     OLE_MM = args.ole_size
     OLE_FONT = args.ole_font
     if args.ole_latex:
         OLE_LATEX.update(load_latex_map(args.ole_latex))
-    with open(args.svg, encoding='utf-8') as f:
-        svg = f.read()
-    conv = Converter(svg)
+
     if args.dump_ole:
-        files = conv.dump_ole(args.dump_ole)
-        print('OLE部品 %d 個を書き出しました:' % len(files))
-        for f in files:
-            print('  ' + f)
+        for path in args.path:
+            if path.lower().endswith('.svg'):
+                with open(path, encoding='utf-8') as f:
+                    files = Converter(f.read()).dump_ole(args.dump_ole)
+                print('%s: OLE部品 %d 個を書き出しました -> %s'
+                      % (path, len(files), args.dump_ole))
         return
-    conv.run()
-    out = args.out or re.sub(r'\.svg$', '', args.svg) + '.drawio'
-    with open(out, 'w', encoding='utf-8') as f:
-        f.write(conv.to_xml())
-    print('%s -> %s' % (args.svg, out))
-    print('  矩形 %(rect)d / 円弧 %(ellipse)d / 線 %(edge)d (端点接続 %(connected)d) / '
-          'テキスト単体 %(text)d / 図形内ラベル %(label)d / 変換不能 %(skipped)d' % conv.stats)
-    if conv.stats['ole_tex']:
-        print('  OLE部品 %(ole_tex)d 個を $$...$$ の数式として出力しました'
-              % conv.stats)
-    if conv.stats['ole']:
-        print('  OLE部品 %(ole)d 個を埋め込み画像として復元しました'
-              '(--ole-latex で数式に置き換えられます)' % conv.stats)
-    if conv.stats['ole'] or conv.stats['ole_tex']:
-        print('  ※ 元の SVG には OLE の表示サイズが入っていないため、短辺 %g mm と'
-              '縦横比から大きさを決めています (--ole-size で調整可)' % OLE_MM)
-    if conv.stats['guessed']:
-        print('  ※ 部品名から種類が分からず、形から推定したもの: %(guessed)d' % conv.stats)
+
+    jobs = collect_jobs(args.path)
+    if not jobs:
+        print('変換対象の SVG が見つかりませんでした')
+        return 1
+    if args.mdpf:
+        for job in jobs:
+            job['mdpf'] = args.mdpf
+    if args.out and len(jobs) > 1:
+        print('-o は入力が1つのときだけ使えます')
+        return 1
+    grand = {}
+    for job in jobs:
+        st = convert_job(job, args.out if len(jobs) == 1 else None)
+        for k, v in st.items():
+            grand[k] = grand.get(k, 0) + v
+    if len(jobs) > 1:
+        print(LF + '合計 %d ファイル' % len(jobs))
+        report(grand)
 
 
 if __name__ == '__main__':
+
     sys.exit(main())

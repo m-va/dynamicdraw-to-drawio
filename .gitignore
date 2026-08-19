@@ -11,3 +11,9 @@ YRC1000*
 比較_*.png
 差分マップ.png
 Untitled*.svg
+
+# 手元の検証用ファイル (誤ってコミットしないように)
+test*.svg
+test*.drawio
+test*.txt
+ole/
