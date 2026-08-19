@@ -107,6 +107,7 @@ pip install pillow
 | Rectangle (no outline — text only) | Text shape, positioned from the actual glyph coordinates |
 | Arc | Ellipse shape |
 | Polyline | **Connector**, with bend points (waypoints), arrowheads and curves |
+| OLE part (equations etc.) | Embedded image, or `$$...$$` math text with `--ole-latex` |
 | Text inside a part | Label of that shape, matching the original alignment and line spacing |
 
 On top of that, the converter does the following.
@@ -124,6 +125,47 @@ On top of that, the converter does the following.
   Dynamic Draw's display language, so both Japanese and English names are recognised; if the name is
   unknown, the type is inferred from the path itself (is it closed? are the corners axis-aligned? is
   it a Bézier curve?).
+
+## OLE parts (Microsoft Equation 3.0 and friends)
+
+Dynamic Draw exports OLE parts **in a form that never renders**:
+
+```xml
+<symbol id='OleImage-52'><image x='0' y='0' width='0' height='0' href='data:image/png;base64,...' /></symbol>
+<use href='#OleImage-52' transform='translate(22.39 14.69) scale(inf, inf)' />
+```
+
+With `width='0' height='0'` and `scale(inf, inf)`, browsers and other tools draw nothing — which is
+why the equations look like they vanished. The **PNG data itself is intact**, however, so this
+converter restores each OLE part as an embedded image, using the recorded position and the PNG's
+aspect ratio.
+
+### Restoring them as real math (draw.io math typesetting)
+
+If you want LaTeX instead of a picture, it takes three steps. The SVG only carries a rasterised PNG,
+so the structure of the formula has to be **read off the image**:
+
+```bash
+# 1. Dump the OLE images so you can see what they contain
+python svg2drawio.py test.svg --dump-ole ole/
+
+# 2. Write a mapping file (ole_latex.txt); backslashes need no escaping
+#    52 = x_{ref}
+#    96 = \frac{1}{M_d s^2 + D_d s + K_d}
+#    97 = \Delta x
+
+# 3. Convert with the mapping
+python svg2drawio.py test.svg --ole-latex ole_latex.txt -o test.drawio
+```
+
+Those parts become text cells wrapped in `$$...$$`, and the file gets `math="1"` so draw.io typesets
+them on open (the manual switch is **View > Math Typesetting**). JSON (`{"52": "x_{ref}"}`) works too.
+
+### Sizing
+
+The original SVG does not record the display size of an OLE part, so **the size is a guess**.
+`--ole-size` (height of one line of maths, in mm, default 4.5) scales everything, and `--ole-font`
+(px) sets just the font size in math mode. Individual items are easy to nudge in draw.io afterwards.
 
 ## Accuracy
 
@@ -149,7 +191,11 @@ What remains is almost entirely text anti-aliasing (sub-pixel bleed).
   coordinates rather than attached.
 - Arrowheads are replaced by draw.io's standard marker (`blockThin`), so unusual arrow shapes will look
   different
-- Only three part types are handled: rectangle, arc and polyline. Anything else is reported as
+- **The display size of an OLE part cannot be recovered** — it is not in the SVG, so `--ole-size`
+  provides an estimate
+- LaTeX cannot be generated automatically from an OLE part (only a rasterised PNG survives in the
+  SVG); you have to read the dumped images and write the mapping file
+- Only four part types are handled: rectangle, arc, polyline and OLE. Anything else is reported as
   "not converted" (`変換不能`) in the summary line.
 
 ## Tunable constants
@@ -160,6 +206,7 @@ They sit at the top of `svg2drawio.py`.
 |---|---|---|
 | `SNAP_TOL` | `0.7` | How close (mm) a line endpoint must be to a shape to be attached to it |
 | `SMALL_SHAPE` | `4.0` | Shapes smaller than this (mm) also accept endpoints that stop inside them |
+| `OLE_MM` | `4.5` | Short side of an OLE part (mm); overridden by `--ole-size` |
 | `PART_KINDS` | — | Part name (Japanese / English) → shape type |
 | `FONT_MAP` | — | SVG font name → draw.io font name |
 | `SYMBOL_MAP` | — | Adobe Symbol character → Unicode |

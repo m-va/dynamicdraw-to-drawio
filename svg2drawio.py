@@ -14,8 +14,10 @@ Dynamic Draw の SVG は
 usage: python svg2drawio.py input.svg [-o output.drawio]
 """
 import argparse
+import base64
 import math
 import re
+import struct
 import sys
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape, quoteattr
@@ -23,6 +25,9 @@ from xml.sax.saxutils import escape, quoteattr
 MM_TO_PX = 96.0 / 25.4          # SVG のユーザー単位は mm。draw.io は px。
 SNAP_TOL = 0.7                  # 線の端点を図形に接続するときの許容距離 (mm)
 SMALL_SHAPE = 4.0               # これ以下の図形は内側で終わる線も接続扱いにする (mm)
+OLE_MM = 4.5                    # OLE 部品 (数式など) の短辺の長さ (mm) -> --ole-size
+OLE_LATEX = {}                  # {部品ID: LaTeX} -> --ole-latex で読み込む
+OLE_FONT = None                 # 数式の文字サイズ (px)。None なら図中の最大文字サイズ
 FONT_MAP = {
     'ＭＳ ゴシック': 'MS Gothic',
     'ＭＳ Ｐゴシック': 'MS PGothic',
@@ -54,6 +59,31 @@ PART_KINDS = (
 )
 
 NUM = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
+
+
+def load_latex_map(path):
+    """OLE 部品 ID -> LaTeX の対応表を読む。
+
+    JSON ({"52": "x_{ref}"}) でも、1 行 1 件のテキストでもよい。
+    テキスト形式は LaTeX のバックスラッシュをそのまま書けるので楽:
+        52 = x_{ref}
+        96: \frac{1}{M_d s^2}
+        # 行頭 # はコメント
+    """
+    with open(path, encoding='utf-8') as f:
+        body = f.read()
+    if body.lstrip().startswith('{'):
+        import json
+        return {str(k): v for k, v in json.loads(body).items()}
+    out = {}
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        m = re.match(r'(\d+)\s*[=:	]\s*(.+)', line)
+        if m:
+            out[m.group(1)] = m.group(2).strip()
+    return out
 
 
 def kind_from_name(name):
@@ -200,9 +230,13 @@ class Converter:
             self.symbols[m.group(1)] = parse_path(m.group(2))
             if is_curved(m.group(2)):
                 self.curvy.add(m.group(1))
+        self.ole_images = dict(re.findall(
+            r"<symbol id='(OleImage-[^']+)'>\s*<image[^>]*base64,([^']+)'", svg))
         self.cells, self.shapes = [], []
-        self.stats = {'rect': 0, 'ellipse': 0, 'edge': 0, 'text': 0,
-                      'label': 0, 'connected': 0, 'guessed': 0, 'skipped': 0}
+        self.math = False                  # LaTeX を出したら draw.io の数式組版を有効にする
+        self.stats = {'rect': 0, 'ellipse': 0, 'edge': 0, 'text': 0, 'label': 0,
+                      'connected': 0, 'guessed': 0, 'ole': 0, 'ole_tex': 0,
+                      'skipped': 0}
 
     # -- helpers
     def px(self, v):
@@ -487,6 +521,78 @@ class Converter:
         self.cells.append(cell)
         self.stats['edge'] += 1
 
+    def ole_font(self):
+        """数式の文字サイズ (px)。
+
+        MathJax は 1 行の数式を文字サイズの約 1.6 倍の高さに組むので、
+        --ole-size (数式の短辺 mm) と辻褄が合うように逆算する。
+        """
+        if OLE_FONT:
+            return round(OLE_FONT, 1)
+        return round(OLE_MM * MM_TO_PX / 1.6, 1)
+
+    def dump_ole(self, outdir):
+        """OLE 部品の PNG を outdir に書き出す (中身を確認して LaTeX に起こす用)。"""
+        import os
+        os.makedirs(outdir, exist_ok=True)
+        written = []
+        for m in re.finditer(r'<!-- [^<>]+? ID=(\d+) -->(.*?)<!-- End of', self.svg, re.S):
+            gid, body = m.group(1), m.group(2)
+            href = re.search(r"href='#(OleImage-[^']+)'", body)
+            b64 = self.ole_images.get(href.group(1)) if href else None
+            if not b64:
+                continue
+            path = os.path.join(outdir, 'ole-%s.png' % gid)
+            with open(path, 'wb') as f:
+                f.write(base64.b64decode(b64))
+            written.append(path)
+        return written
+
+    def do_ole(self, gid, body):
+        """OLE 部品 (Microsoft 数式など) を埋め込み画像として復元する。
+
+        Dynamic Draw の SVG 出力は OLE を <image width='0' height='0'> と
+        transform='translate(x y) scale(inf, inf)' で書き出すため、そのままでは
+        大きさゼロで表示されない。PNG のデータと左上座標・縦横比は残っているので、
+        短辺を OLE_MM (mm) として復元する。
+        """
+        latex = OLE_LATEX.get(gid)
+        href = re.search(r"href='#(OleImage-[^']+)'", body)
+        pos = re.search(r'translate\(\s*([-\d.]+)[\s,]+([-\d.]+)\s*\)', body)
+        b64 = self.ole_images.get(href.group(1)) if href else None
+        if not b64 or not pos:
+            self.stats['skipped'] += 1
+            return
+        try:
+            raw = base64.b64decode(b64)
+            pw, ph = struct.unpack('>II', raw[16:24])
+        except Exception:
+            self.stats['skipped'] += 1
+            return
+        if not pw or not ph:
+            self.stats['skipped'] += 1
+            return
+        x, y = float(pos.group(1)), float(pos.group(2))
+        if pw >= ph:                       # 短辺を OLE_MM にして縦横比を保つ
+            h = OLE_MM
+            w = OLE_MM * pw / ph
+        else:
+            w = OLE_MM
+            h = OLE_MM * ph / pw
+        if latex:                          # LaTeX が与えられていれば数式として置く
+            style = ['text', 'html=1', 'fillColor=none', 'strokeColor=none',
+                     'whiteSpace=nowrap', 'overflow=visible', 'spacing=0',
+                     'align=center', 'verticalAlign=middle',
+                     'fontSize=%g' % self.ole_font()]
+            self.add_shape('o%s' % gid, 'ole_tex', (x, y, w, h), style,
+                           '$$' + escape(latex) + '$$', is_shape=False)
+            self.math = True
+            return
+        style = ['shape=image', 'imageAspect=1', 'aspect=fixed', 'noLabel=1',
+                 'verticalLabelPosition=bottom', 'verticalAlign=top',
+                 'image=data:image/png,' + b64]
+        self.add_shape('o%s' % gid, 'ole', (x, y, w, h), style, '', is_shape=False)
+
     def connect_edges(self):
         """線の端点が図形の縁に乗っていれば source/target として接続する。"""
         for c in self.cells:
@@ -552,6 +658,9 @@ class Converter:
     def run(self):
         for m in re.finditer(r'<!-- ([^<>]+?) ID=(\d+) -->(.*?)<!-- End of', self.svg, re.S):
             name, gid, body = m.group(1), m.group(2), m.group(3)
+            if 'OleImage-' in body:            # OLE 部品 (数式など)
+                self.do_ole(gid, body)
+                continue
             kind = kind_from_name(name)
             if kind is None:                   # 名前で分からなければ形から推定する
                 kind = self.kind_from_shape(body)
@@ -573,8 +682,8 @@ class Converter:
                '  <diagram name=%s id="page1">' % quoteattr(name),
                '    <mxGraphModel dx="1422" dy="798" grid="1" gridSize="10" guides="1" '
                'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" '
-               'pageWidth="%d" pageHeight="%d" math="0" shadow="0">'
-               % (round(vb[2] * MM_TO_PX), round(vb[3] * MM_TO_PX)),
+               'pageWidth="%d" pageHeight="%d" math="%d" shadow="0">'
+               % (round(vb[2] * MM_TO_PX), round(vb[3] * MM_TO_PX), self.math),
                '      <root>',
                '        <mxCell id="0" />',
                '        <mxCell id="1" parent="0" />']
@@ -612,13 +721,40 @@ class Converter:
 
 
 def main():
+    global OLE_MM
+    global OLE_FONT
+    global OLE_LATEX
     ap = argparse.ArgumentParser(description='Dynamic Draw SVG -> draw.io 変換')
     ap.add_argument('svg')
     ap.add_argument('-o', '--out')
+    ap.add_argument('--ole-size', type=float, default=OLE_MM, metavar='MM',
+                    help='OLE 部品 (数式など) の短辺の長さ (mm, 既定 %(default)s)。'
+                         'Dynamic Draw の SVG 出力には OLE の表示サイズが入らないため、'
+                         'この値と PNG の縦横比から大きさを決める')
+    ap.add_argument('--ole-font', type=float, metavar='PX',
+                    help='--ole-latex で出す数式の文字サイズ (px)。'
+                         '既定は図中の最大文字サイズ')
+    ap.add_argument('--dump-ole', metavar='DIR',
+                    help='OLE 部品の PNG を DIR に書き出して終了する'
+                         '(中身を見て LaTeX に起こすため)')
+    ap.add_argument('--ole-latex', metavar='JSON',
+                    help='OLE部品ID と LaTeX の対応表 (JSON または「52 = x_{ref}」形式の'
+                         'テキスト) を読み込み、その部品を $$...$$ の数式テキストとして'
+                         '出力する (draw.io の数式組版を有効化)')
     args = ap.parse_args()
+    OLE_MM = args.ole_size
+    OLE_FONT = args.ole_font
+    if args.ole_latex:
+        OLE_LATEX.update(load_latex_map(args.ole_latex))
     with open(args.svg, encoding='utf-8') as f:
         svg = f.read()
     conv = Converter(svg)
+    if args.dump_ole:
+        files = conv.dump_ole(args.dump_ole)
+        print('OLE部品 %d 個を書き出しました:' % len(files))
+        for f in files:
+            print('  ' + f)
+        return
     conv.run()
     out = args.out or re.sub(r'\.svg$', '', args.svg) + '.drawio'
     with open(out, 'w', encoding='utf-8') as f:
@@ -626,6 +762,15 @@ def main():
     print('%s -> %s' % (args.svg, out))
     print('  矩形 %(rect)d / 円弧 %(ellipse)d / 線 %(edge)d (端点接続 %(connected)d) / '
           'テキスト単体 %(text)d / 図形内ラベル %(label)d / 変換不能 %(skipped)d' % conv.stats)
+    if conv.stats['ole_tex']:
+        print('  OLE部品 %(ole_tex)d 個を $$...$$ の数式として出力しました'
+              % conv.stats)
+    if conv.stats['ole']:
+        print('  OLE部品 %(ole)d 個を埋め込み画像として復元しました'
+              '(--ole-latex で数式に置き換えられます)' % conv.stats)
+    if conv.stats['ole'] or conv.stats['ole_tex']:
+        print('  ※ 元の SVG には OLE の表示サイズが入っていないため、短辺 %g mm と'
+              '縦横比から大きさを決めています (--ole-size で調整可)' % OLE_MM)
     if conv.stats['guessed']:
         print('  ※ 部品名から種類が分からず、形から推定したもの: %(guessed)d' % conv.stats)
 
