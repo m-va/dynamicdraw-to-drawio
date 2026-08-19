@@ -63,6 +63,9 @@ FENCES = {
 }
 
 
+FRAC_CMD = chr(92) + 'frac'
+
+
 class Unsupported(Exception):
     """LaTeX に落とせない構造に当たった。"""
 
@@ -229,7 +232,13 @@ class Mtef:
         s = [flat(x) for x in slots] + ['', '', '']
         if sel in FENCES:
             left, right = FENCES[sel]
-            return r'\left%s %s \right%s ' % (left, s[0], right)
+            # 中身が背の高い構造のときだけ \left..\right で括弧を伸ばす。
+            # 単純な式まで伸縮括弧にすると、組版系によっては極端に幅を取る。
+            tall = (r'\frac' in s[0] or r'\sqrt' in s[0] or r'\begin' in s[0]
+                    or r'\left' in s[0])
+            if tall:
+                return r'\left%s %s \right%s ' % (left, s[0], right)
+            return '%s%s%s' % (left, s[0], right)
         if sel == 13:                   # 根号
             return r'\sqrt{%s}' % s[0] if var == 0 else r'\sqrt[%s]{%s}' % (s[1], s[0])
         if sel == 14:                   # 分数
@@ -287,6 +296,86 @@ def mtef_to_latex(data):
     return body, m.ok and bool(body)
 
 
+# ----------------------------------------------- OLE 複合ドキュメント読み ---
+def _chain(fat, start, limit):
+    """FAT を辿ってセクタ番号の並びを返す。"""
+    out, n = [], start
+    while 0 <= n < limit and len(out) < limit:
+        out.append(n)
+        n = fat[n] if n < len(fat) else 0xFFFFFFFE
+    return out
+
+
+def cfb_stream(data, want):
+    """複合ドキュメント (CFB) から指定名のストリームを取り出す。
+
+    小さいストリームは 64 バイトのミニセクタに分割され、連続配置とは限らないので、
+    ミニ FAT を辿って組み立てる必要がある。
+    """
+    if len(data) < 512 or data[:8] != CFB_SIG:
+        return None
+    ssz = 1 << struct.unpack('<H', data[30:32])[0]
+    msz = 1 << struct.unpack('<H', data[32:34])[0]
+    cutoff = struct.unpack('<I', data[56:60])[0]
+    dir_start = struct.unpack('<I', data[48:52])[0]
+    mini_start = struct.unpack('<I', data[60:64])[0]
+    difat_start, difat_count = struct.unpack('<II', data[68:76])
+    nsect = max(0, (len(data) - 512) // ssz)
+
+    def sector(n):
+        off = 512 + n * ssz
+        return data[off:off + ssz]
+
+    # DIFAT -> FAT
+    difat = list(struct.unpack('<109I', data[76:512]))
+    n, guard = difat_start, 0
+    while 0 <= n < nsect and guard < nsect:
+        blk = sector(n)
+        difat += list(struct.unpack('<%dI' % (ssz // 4 - 1), blk[:ssz - 4]))
+        n = struct.unpack('<I', blk[ssz - 4:ssz])[0]
+        guard += 1
+    fat = []
+    for fs in difat:
+        if 0 <= fs < nsect:
+            fat += list(struct.unpack('<%dI' % (ssz // 4), sector(fs)))
+
+    def read_chain(start, size, unit, store):
+        buf = b''
+        for sec in _chain(fat if unit == ssz else minifat, start, nsect * (ssz // unit) + 8):
+            if unit == ssz:
+                buf += sector(sec)
+            else:
+                off = sec * unit
+                buf += store[off:off + unit]
+            if len(buf) >= size:
+                break
+        return buf[:size]
+
+    # ディレクトリを読み、ルートからミニストリーム本体を得る
+    dirdata = b''.join(sector(n) for n in _chain(fat, dir_start, nsect))
+    entries = []
+    for off in range(0, len(dirdata) - 127, 128):
+        e = dirdata[off:off + 128]
+        nlen = struct.unpack('<H', e[64:66])[0]
+        name = e[:max(0, nlen - 2)].decode('utf-16-le', 'ignore')
+        entries.append((name, e[66], struct.unpack('<I', e[116:120])[0],
+                        struct.unpack('<Q', e[120:128])[0]))
+    root = next((e for e in entries if e[1] == 5), None)
+    if root is None:
+        return None
+    minifat = []
+    for n in _chain(fat, mini_start, max(difat_count, 1) + nsect):
+        minifat += list(struct.unpack('<%dI' % (ssz // 4), sector(n)))
+    ministore = b''.join(sector(n) for n in _chain(fat, root[2], nsect))
+
+    for name, typ, start, size in entries:
+        if typ == 2 and name == want:
+            if size < cutoff:
+                return read_chain(start, size, msz, ministore)
+            return read_chain(start, size, ssz, None)
+    return None
+
+
 # ------------------------------------------------------------ mdpf 読み ---
 def read_payload(path):
     """mdpf (PNG) の mdRw チャンクを展開して中身を返す。"""
@@ -321,14 +410,20 @@ def read_equations(path):
                     rect = r
             except struct.error:
                 pass
-        m = re.search(re.escape(EQN_SIG), doc[off:end])
-        if not m or rect is None:
+        if rect is None:
             continue
-        eoff = off + m.start()
-        size = struct.unpack('<I', doc[eoff + 8:eoff + 12])[0]
-        if not 8 <= size <= 200000:
+        stream = cfb_stream(doc[off:end], 'Equation Native')
+        if stream is None:                 # CFB として読めなければ従来どおり直読み
+            m = re.search(re.escape(EQN_SIG), doc[off:end])
+            if not m:
+                continue
+            eoff = off + m.start()
+            size = struct.unpack('<I', doc[eoff + 8:eoff + 12])[0]
+            stream = doc[eoff:eoff + 28 + max(0, min(size, 200000))]
+        if len(stream) < 34:
             continue
-        mtef = doc[eoff + 28:eoff + 28 + size]
+        size = struct.unpack('<I', stream[8:12])[0]
+        mtef = stream[28:28 + size] if 8 <= size <= 200000 else stream[28:]
         latex, ok = mtef_to_latex(mtef)
         out.append({'rect': rect, 'latex': latex, 'ok': ok, 'mtef': mtef})
     return out

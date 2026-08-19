@@ -28,7 +28,8 @@ SNAP_TOL = 0.7                  # 線の端点を図形に接続するときの�
 SMALL_SHAPE = 4.0               # これ以下の図形は内側で終わる線も接続扱いにする (mm)
 OLE_MM = 4.5                    # OLE 部品 (数式など) の短辺の長さ (mm) -> --ole-size
 OLE_LATEX = {}                  # {部品ID: LaTeX} -> --ole-latex で読み込む
-OLE_FONT = None                 # 数式の文字サイズ (px)。None なら図中の最大文字サイズ
+OLE_FONT = None                 # 数式の文字サイズ (px)。None なら実寸から決める
+EQ_MARGIN = 0.9                 # 数式が枠からはみ出さないための余裕
 FONT_MAP = {
     'ＭＳ ゴシック': 'MS Gothic',
     'ＭＳ Ｐゴシック': 'MS PGothic',
@@ -63,31 +64,118 @@ NUM = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?')
 LF = chr(10)
 
 
-FRAC = chr(92) + 'frac'
+BS = chr(92)                    # LaTeX のバックスラッシュ
 
 
-def em_height(latex):
-    """LaTeX を組んだときの高さの見込み (文字サイズの何倍か)。"""
-    depth = level = 0
-    i = 0
-    while True:
-        i = latex.find(FRAC, i)
-        if i < 0:
-            break
-        level = 1
-        j, brace, seen = i + 5, 0, 0
-        while j < len(latex) and seen < 2:      # 分子・分母の中を見る
-            if latex[j] == '{':
-                brace += 1
-            elif latex[j] == '}':
-                brace -= 1
-                if brace == 0:
-                    seen += 1
-            j += 1
-        level += em_height(latex[i + 5:j]) / 1.2 - 1.6 / 1.2
-        depth = max(depth, level)
-        i = j
-    return 1.6 + 1.2 * depth
+def brace_group(tex, i):
+    """tex[i] が '{' のとき、対応する '}' の次の位置と中身を返す。"""
+    if i >= len(tex) or tex[i] != '{':
+        return i, ''
+    depth = 0
+    for j in range(i, len(tex)):
+        if tex[j] == '{':
+            depth += 1
+        elif tex[j] == '}':
+            depth -= 1
+            if depth == 0:
+                return j + 1, tex[i + 1:j]
+    return len(tex), tex[i + 1:]
+
+
+# 数式を組んだときの大きさの見積もり。MathJax で 88 個の数式を実測して係数を
+# 合わせてあり、幅・高さとも実測との比が中央値 1.0、四分位で ±20% 程度に収まる。
+TEX_SPACES = {BS + ',': 0.17, BS + ';': 0.28, BS + ':': 0.22, BS + '!': -0.17,
+              BS + 'quad': 1.0, BS + 'qquad': 2.0}
+TEX_W = 1.17                    # 実測に合わせる補正
+TEX_H = 0.77
+
+
+def em_size(tex, raw=False):
+    """LaTeX を組んだときの (幅, 高さ) を em 単位で見積もる。"""
+    w, asc, desc, i = 0.0, 0.75, 0.28, 0
+    while i < len(tex):
+        c = tex[i]
+        if c == BS:
+            m = re.match(re.escape(BS) + r'([a-zA-Z]+|.)', tex[i:])
+            if not m:
+                i += 1
+                continue
+            cmd = BS + m.group(1)
+            i += len(cmd)
+            if cmd in TEX_SPACES:
+                w += TEX_SPACES[cmd]
+            elif cmd == BS + 'frac':
+                j, num = brace_group(tex, i)
+                k, den = brace_group(tex, j)
+                i = k
+                nw, na, nd = em_size(num, raw=True)
+                dw, da, dd = em_size(den, raw=True)
+                w += max(nw, dw) + 0.25
+                asc = max(asc, na + nd + 0.35)
+                desc = max(desc, da + dd - 0.1)
+            elif cmd in (BS + 'left', BS + 'right'):
+                i += 1
+                w += 0.42
+            else:
+                w += 0.6                    # lpha 	au \Delta など
+            continue
+        if c in '_^':
+            j, sub = brace_group(tex, i + 1)
+            if j == i + 1:                  # x_1 のように括弧が無い形
+                j, sub = i + 2, tex[i + 1:i + 2]
+            sw, sa, sd = em_size(sub, raw=True)
+            w += 0.72 * sw
+            if c == '_':
+                desc = max(desc, 0.28 + 0.55 * (sa + sd) - 0.35)
+            else:
+                asc = max(asc, 0.75 + 0.55 * (sa + sd) - 0.35)
+            i = j
+            continue
+        i += 1
+        if c in '{} ':
+            continue
+        if c in '+-=<>':
+            w += 0.78                       # 二項演算子は前後の空きを含む
+        elif c in '()[]/|':
+            w += 0.42
+        elif c.isupper():
+            w += 0.72
+        elif c.isdigit():
+            w += 0.5
+        else:
+            w += 0.52
+    if raw:
+        return w, asc, desc
+    return w * TEX_W, (asc + desc) * TEX_H
+
+
+def fit_font(latex, w_mm, h_mm):
+    """外接矩形 (mm) に収まる最大の文字サイズ (px)。"""
+    ew, eh = em_size(latex)
+    if ew <= 0 or eh <= 0:
+        return None
+    return min(w_mm * MM_TO_PX / ew, h_mm * MM_TO_PX / eh)
+
+
+def calibrate_font(equations):
+    """数式群から基準の文字サイズ (px) を 1 つ決める。
+
+    元の図では数式はすべて同じ基準サイズで作られている。1 つずつ枠に合わせると
+    大小がまちまちになるので、各数式が枠に収まる最大サイズの中央値を採り、
+    文書全体で同じ大きさに揃える。
+    """
+    vals = []
+    for eq in equations:
+        if not eq.get('ok') or not eq.get('latex') or not eq.get('rect'):
+            continue
+        L, T, R, B = eq['rect']
+        f = fit_font(eq['latex'], R - L, B - T)
+        if f:
+            vals.append(f)
+    if not vals:
+        return None
+    vals.sort()
+    return round(vals[len(vals) // 2], 1)
 
 
 def mxfile(diagrams):
@@ -270,6 +358,7 @@ class Converter:
         self.cells, self.shapes = [], []
         self.prefix = ''                   # 複数ページ時に ID が衝突しないように
         self.equations = {}                # {部品ID: mdpf から読んだ数式}
+        self.eq_font = None                # 文書全体で揃えた数式の文字サイズ (px)
         self.math = False                  # LaTeX を出したら draw.io の数式組版を有効にする
         self.stats = {'rect': 0, 'ellipse': 0, 'edge': 0, 'text': 0, 'label': 0,
                       'connected': 0, 'guessed': 0, 'ole': 0, 'ole_tex': 0,
@@ -558,16 +647,20 @@ class Converter:
         self.cells.append(cell)
         self.stats['edge'] += 1
 
-    def ole_font(self, height=None, latex=''):
+    def ole_font(self, height=None, latex='', width=None):
         """数式の文字サイズ (px)。
 
-        MathJax は 1 行の数式を文字サイズの約 1.6 倍の高さに組む。分数が入ると
-        その分だけ背が高くなるので、入れ子の深さから見込みの高さ (em) を出して
-        数式の実寸 (mm) から文字サイズを逆算する。
+        文書全体で決めた基準サイズを使いつつ、その数式の外接矩形に収まらない
+        場合だけ小さくする。こうすると大きさが揃ったまま、はみ出しも防げる。
         """
         if OLE_FONT:
             return round(OLE_FONT, 1)
-        return round((height or OLE_MM) * MM_TO_PX / em_height(latex), 1)
+        fit = fit_font(latex, width, height) if latex and width and height else None
+        base = self.eq_font or fit
+        if base is None:
+            _w, eh = em_size(latex or 'x')
+            base = (height or OLE_MM) * MM_TO_PX / max(eh, 0.5)
+        return round(min(base, fit) * EQ_MARGIN if fit else base * EQ_MARGIN, 1)
 
     def ole_parts(self):
         """[(部品ID, x, y, 縦横比)] を返す。mdpf の数式と突き合わせるのに使う。"""
@@ -644,7 +737,7 @@ class Converter:
             style = ['text', 'html=1', 'fillColor=none', 'strokeColor=none',
                      'whiteSpace=nowrap', 'overflow=visible', 'spacing=0',
                      'align=center', 'verticalAlign=middle',
-                     'fontSize=%g' % self.ole_font(h, latex)]
+                     'fontSize=%g' % self.ole_font(h, latex, w)]
             self.add_shape(self.prefix + 'o%s' % gid, 'ole_tex', (x, y, w, h), style,
                            '$$' + escape(latex) + '$$', is_shape=False)
             self.math = True
@@ -827,7 +920,9 @@ def convert_job(job, out=None):
         try:
             import mdpf as mdpf_reader
             equations = mdpf_reader.read_equations(job['mdpf'])
-            print('%s: 数式 %d 個を読み込みました' % (job['mdpf'], len(equations)))
+            font = calibrate_font(equations)
+            print('%s: 数式 %d 個を読み込みました (文字サイズ %s px に統一)'
+                  % (job['mdpf'], len(equations), font or '自動'))
         except Exception as e:
             print('%s を読めませんでした (%s)。画像として復元します' % (job['mdpf'], e))
     pages, total = [], {}
@@ -839,6 +934,7 @@ def convert_job(job, out=None):
             import mdpf as mdpf_reader
             matched = mdpf_reader.match_to_svg(equations, conv.ole_parts())
             conv.equations = matched
+            conv.eq_font = font
         conv.run()
         pages.append(conv.diagram_xml(os.path.basename(os.path.splitext(path)[0]), n))
         print('  %s' % path)

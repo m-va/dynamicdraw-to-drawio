@@ -154,6 +154,10 @@ The SVG is exported as a crop of the drawing, so the two coordinate systems are 
 converter recovers the offset by **voting over pairs whose aspect ratios agree**, so you never have
 to say which sheet an SVG came from.
 
+Equation sizes use **one base size for the whole document, shrunk only for the equations that would
+not fit** their bounding rectangle. The base size is the median of the largest size that fits each
+equation (the typesetting-size estimator was fitted against MathJax measurements of 88 equations).
+
 ### Converting many files at once
 
 Give it a folder and it pairs `xxx.mdpf` with `xxx_1.svg, xxx_2.svg, …` (or `xxx.svg`) and writes
