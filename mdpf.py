@@ -6,7 +6,10 @@ MFC のシリアライズとして入っている。その中に OLE 部品が�
 (CFB) として並んでおり、各 CFB の直前には部品の外接矩形が double 4 個
 (left, top, right, bottom, 単位 mm) で置かれている。
 
-    ... [外接矩形 double x4][26バイトのヘッダ][CFB: D0CF11E0...] ...
+    ... [外接矩形 double x4][ヘッダ][CFB: D0CF11E0...] ...
+
+ヘッダの長さは通常 26 バイトだが、その種類で最初に現れる部品だけは MFC が
+クラス名を書き出す分だけ長くなる (find_rect 参照)。
 
 CFB の中には Microsoft 数式 3.0 / MathType の "Equation Native" ストリームが
 あり、その 28 バイトのヘッダに続いて MTEF (MathType Equation Format) v3 の
@@ -392,6 +395,27 @@ def read_payload(path):
     raise ValueError('%s は Dynamic Draw の mdpf ではないようです' % path)
 
 
+def find_rect(doc, cfb_off, near=26, far=200):
+    """OLE データの直前に置かれた外接矩形 (double 4 個, mm) を探す。
+
+    通常は CFB の 58 バイト手前だが、その種類で最初に現れる部品だけは
+    MFC がクラス名 ("CMolipDrawCntrItem4_0" など) を書き出す分だけ前にずれる。
+    そのため固定オフセットにせず、CFB に近いほうから妥当な矩形を探す。
+    """
+    for back in range(near, far):
+        seg = doc[cfb_off - back - 32:cfb_off - back]
+        if len(seg) < 32:
+            continue
+        try:
+            L, T, R, B = struct.unpack('<4d', seg)
+        except struct.error:
+            continue
+        if (0 <= L < R < 1e5 and 0 <= T < B < 1e5
+                and 0.3 < R - L < 500 and 0.3 < B - T < 500):
+            return (L, T, R, B)
+    return None
+
+
 def read_equations(path):
     """mdpf 内の OLE 数式を [{rect, latex, ok, mtef}] で返す。
 
@@ -402,14 +426,7 @@ def read_equations(path):
     starts = [m.start() for m in re.finditer(re.escape(CFB_SIG), doc)]
     for n, off in enumerate(starts):
         end = starts[n + 1] if n + 1 < len(starts) else len(doc)
-        rect = None
-        if off >= 58:
-            try:
-                r = struct.unpack('<4d', doc[off - 58:off - 26])
-                if all(-1e4 < v < 1e5 for v in r) and r[2] > r[0] and r[3] > r[1]:
-                    rect = r
-            except struct.error:
-                pass
+        rect = find_rect(doc, off)
         if rect is None:
             continue
         stream = cfb_stream(doc[off:end], 'Equation Native')
