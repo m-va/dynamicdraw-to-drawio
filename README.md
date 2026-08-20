@@ -168,6 +168,9 @@ python svg2drawio.py path/to/drawings/
 ```
 
 With no argument at all it processes the current folder.
+If an SVG has no identically-named `.mdpf`, the converter tries the other mdpf files in the folder and
+picks the one whose OLE parts line up — so renamed files still find their source.
+
 
 ### Assigning LaTeX by hand (when you have no .mdpf)
 

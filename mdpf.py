@@ -2,7 +2,8 @@
 """Dynamic Draw の .mdpf から OLE 数式 (MathType MTEF) を取り出して LaTeX にする。
 
 .mdpf は PNG コンテナで、図面データは私的チャンク mdRw に zlib 圧縮された
-MFC のシリアライズとして入っている。その中に OLE 部品が複合ドキュメント
+MFC のシリアライズとして入っている。大きい図面では mdRw が複数チャンクに
+分かれる (展開後 1MB ごと) ため、すべて展開して連結する必要がある。その中に OLE 部品が複合ドキュメント
 (CFB) として並んでおり、各 CFB の直前には部品の外接矩形が double 4 個
 (left, top, right, bottom, 単位 mm) で置かれている。
 
@@ -380,19 +381,41 @@ def cfb_stream(data, want):
 
 
 # ------------------------------------------------------------ mdpf 読み ---
+def zlib_start(blob):
+    """バイト列の先頭付近から zlib ストリームの開始位置を探す。"""
+    for i in range(0, min(len(blob), 256) - 1):
+        if blob[i] & 0x0F == 8 and ((blob[i] << 8) | blob[i + 1]) % 31 == 0:
+            try:
+                zlib.decompressobj().decompress(blob[i:i + 64])
+                return i
+            except zlib.error:
+                continue
+    return -1
+
+
 def read_payload(path):
-    """mdpf (PNG) の mdRw チャンクを展開して中身を返す。"""
+    """mdpf (PNG) の mdRw チャンクを展開して図面データを返す。
+
+    大きい図面では mdRw チャンクが複数に分かれる (展開後 1MB ごと)。
+    すべて展開して連結しないと、後半のシートの部品が丸ごと欠ける。
+    """
     with open(path, 'rb') as f:
         data = f.read()
-    i = 8
+    parts, i = [], 8
     while i < len(data) - 8:
         ln = struct.unpack('>I', data[i:i + 4])[0]
         typ = data[i + 4:i + 8]
         if typ == b'mdRw':
             blob = data[i + 8:i + 8 + ln]
-            return zlib.decompressobj().decompress(blob[blob.index(b'\x78\x01'):])
+            pos = zlib_start(blob)
+            if pos >= 0:
+                parts.append(zlib.decompressobj().decompress(blob[pos:]))
+        elif typ == b'IEND':
+            break
         i += 12 + ln
-    raise ValueError('%s は Dynamic Draw の mdpf ではないようです' % path)
+    if not parts:
+        raise ValueError('%s は Dynamic Draw の mdpf ではないようです' % path)
+    return b''.join(parts)
 
 
 def find_rect(doc, cfb_off, near=26, far=200):

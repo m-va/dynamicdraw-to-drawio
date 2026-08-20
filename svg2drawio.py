@@ -15,6 +15,7 @@ usage: python svg2drawio.py input.svg [-o output.drawio]
 """
 import argparse
 import base64
+import hashlib
 import os
 import math
 import re
@@ -359,10 +360,11 @@ class Converter:
         self.prefix = ''                   # 複数ページ時に ID が衝突しないように
         self.equations = {}                # {部品ID: mdpf から読んだ数式}
         self.eq_font = None                # 文書全体で揃えた数式の文字サイズ (px)
+        self.ole_image_of = {}             # {部品ID: 画像シンボル名}
         self.math = False                  # LaTeX を出したら draw.io の数式組版を有効にする
         self.stats = {'rect': 0, 'ellipse': 0, 'edge': 0, 'text': 0, 'label': 0,
                       'connected': 0, 'guessed': 0, 'ole': 0, 'ole_tex': 0,
-                      'skipped': 0}
+                      'ole_copy': 0, 'skipped': 0}
 
     # -- helpers
     def px(self, v):
@@ -679,7 +681,19 @@ class Converter:
                 continue
             if pw and ph:
                 out.append((gid, float(pos.group(1)), float(pos.group(2)), pw / ph))
+                self.ole_image_of[gid] = href.group(1)
         return out
+
+    def ole_image_keys(self):
+        """{部品ID: 画像の中身のハッシュ}。同じ数式が複数回置かれているかの判定用。"""
+        if not self.ole_image_of:
+            self.ole_parts()
+        keys = {}
+        for gid, sym in self.ole_image_of.items():
+            b64 = self.ole_images.get(sym)
+            if b64:
+                keys[gid] = hashlib.md5(b64.encode('ascii', 'ignore')).hexdigest()
+        return keys
 
     def dump_ole(self, outdir):
         """OLE 部品の PNG を outdir に書き出す (中身を確認して LaTeX に起こす用)。"""
@@ -909,12 +923,41 @@ def collect_jobs(paths):
     jobs = []
     for base in sorted(groups):
         sheets = [sv for _n, sv in sorted(groups[base])]
-        jobs.append({'base': base, 'svgs': sheets, 'mdpf': mdpfs.get(base)})
+        jobs.append({'base': base, 'svgs': sheets, 'mdpf': mdpfs.get(base),
+                     'others': sorted(set(mdpfs.values()))})
     return jobs
+
+
+def guess_mdpf(job):
+    """同じ名前の mdpf が無いとき、フォルダ内の他の mdpf から相方を探す。
+
+    ファイル名を付け替えていても、OLE 部品の位置と大きさが一致すれば分かる。
+    """
+    import mdpf as mdpf_reader
+    with open(job['svgs'][0], encoding='utf-8') as f:
+        parts = Converter(f.read()).ole_parts()
+    if not parts:
+        return None
+    best = (0, None)
+    for cand in job['others']:
+        try:
+            hit = len(mdpf_reader.match_to_svg(mdpf_reader.read_equations(cand), parts))
+        except Exception:
+            continue
+        if hit > best[0]:
+            best = (hit, cand)
+    if best[1] and best[0] >= len(parts) * 0.5:
+        print('%s: 同名の mdpf が無いので %s を使います (%d/%d 部品が一致)'
+              % (os.path.basename(job['svgs'][0]), os.path.basename(best[1]),
+                 best[0], len(parts)))
+        return best[1]
+    return None
 
 
 def convert_job(job, out=None):
     """1つの .drawio を書き出す。戻り値は集計用の統計。"""
+    if not job['mdpf'] and job.get('others'):
+        job['mdpf'] = guess_mdpf(job)
     equations = []
     if job['mdpf']:
         try:
@@ -925,22 +968,43 @@ def convert_job(job, out=None):
                   % (job['mdpf'], len(equations), font or '自動'))
         except Exception as e:
             print('%s を読めませんでした (%s)。画像として復元します' % (job['mdpf'], e))
-    pages, total = [], {}
+    sheets = []
     for n, path in enumerate(job['svgs'], 1):
         with open(path, encoding='utf-8') as f:
             conv = Converter(f.read())
         conv.prefix = 'p%d-' % n
+        matched = {}
         if equations:
             import mdpf as mdpf_reader
             matched = mdpf_reader.match_to_svg(equations, conv.ole_parts())
-            conv.equations = matched
             conv.eq_font = font
+        sheets.append((path, conv, matched))
+
+    if equations:
+        # 同じ数式が複数箇所に置かれている図では、mdpf 側の OLE の数より
+        # SVG 側の部品数のほうが多くなる。座標で対応が付かなかった部品は、
+        # 画像がまったく同じ部品 (= 同じ数式) から借りてくる。
+        by_image = {}
+        for _path, conv, matched in sheets:
+            keys = conv.ole_image_keys()
+            for gid, eq in matched.items():
+                by_image.setdefault(keys.get(gid), eq)
+        for _path, conv, matched in sheets:
+            for gid, key in conv.ole_image_keys().items():
+                if gid not in matched and by_image.get(key):
+                    matched[gid] = by_image[key]
+                    conv.stats['ole_copy'] += 1
+            conv.equations = matched
+
+    pages, total = [], {}
+    for n, (path, conv, _m) in enumerate(sheets, 1):
         conv.run()
         pages.append(conv.diagram_xml(os.path.basename(os.path.splitext(path)[0]), n))
         print('  %s' % path)
         report(conv.stats, indent='    ')
         for k, v in conv.stats.items():
             total[k] = total.get(k, 0) + v
+
     dest = out or job['base'] + '.drawio'
     with open(dest, 'w', encoding='utf-8') as f:
         f.write(mxfile(pages))
@@ -953,6 +1017,8 @@ def report(st, indent='  '):
           'テキスト単体 %(text)d / 図形内ラベル %(label)d / 変換不能 %(skipped)d' % st)
     if st.get('ole_tex'):
         print(indent + 'OLE部品 %(ole_tex)d 個を $$...$$ の数式として出力' % st)
+    if st.get('ole_copy'):
+        print(indent + 'うち %(ole_copy)d 個は同じ画像の部品から数式を流用' % st)
     if st.get('ole'):
         print(indent + 'OLE部品 %(ole)d 個は埋め込み画像 '
               '(mdpf を渡すか --ole-latex を使うと数式にできます)' % st)
