@@ -108,7 +108,7 @@ pip install pillow
 | Rounded rectangle | Rounded rectangle shape |
 | Arc | Ellipse shape |
 | Table / group part | Expanded into its individual rectangles, ellipses and lines |
-| Closed diamond polyline | Rhombus shape (flowchart decision) |
+| Closed polyline | A shape, not a line (rhombus for diamonds, a stencil that keeps the outline for hexagons etc.) |
 | Polyline | **Connector**, with bend points (waypoints), arrowheads and curves |
 | OLE part (equations etc.) | Embedded image, or `$$...$$` math text with `--ole-latex` |
 | Text inside a part | Label of that shape, matching the original alignment and line spacing |

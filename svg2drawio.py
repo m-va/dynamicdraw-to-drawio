@@ -15,6 +15,7 @@ usage: python svg2drawio.py input.svg [-o output.drawio]
 """
 import argparse
 import base64
+import zlib
 import hashlib
 import os
 import math
@@ -271,17 +272,55 @@ def is_curved(d):
     return False
 
 
+def is_closed(pts):
+    """始点と終点が同じ = 閉じた図形か。"""
+    return (len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 1e-6
+            and abs(pts[0][1] - pts[-1][1]) < 1e-6)
+
+
 def is_rhombus(pts):
-    """閉じた 4 点が外接矩形の各辺の中点にあるか (= 菱形)。"""
-    p = pts[:-1] if len(pts) == 5 else pts
+    """閉じた 4 点が外接矩形の各辺の中点に 1 つずつ対応するか (= 菱形)。"""
+    p = pts[:-1] if is_closed(pts) else pts
     if len(p) != 4:
         return False
     x0, y0, x1, y1 = bbox(p)
+    w, h = x1 - x0, y1 - y0
+    if w < 1e-6 or h < 1e-6:
+        return False
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    tol = max(x1 - x0, y1 - y0) * 0.06 + 0.05
+    tol = min(w, h) * 0.08
     mids = [(cx, y0), (x1, cy), (cx, y1), (x0, cy)]
-    return all(any(abs(a[0] - b[0]) < tol and abs(a[1] - b[1]) < tol for b in mids)
-               for a in p)
+    used = set()
+    for a in p:
+        hit = next((i for i, b in enumerate(mids)
+                    if i not in used and abs(a[0] - b[0]) <= tol
+                    and abs(a[1] - b[1]) <= tol), None)
+        if hit is None:
+            return False
+        used.add(hit)
+    return True
+
+
+def bbox_geo(pts):
+    x0, y0, x1, y1 = bbox(pts)
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
+def stencil(pts):
+    """多角形を draw.io のステンシル図形にする (mxGraph の圧縮 XML)。"""
+    x0, y0, x1, y1 = bbox(pts)
+    w, h = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
+    W, H = round(w * MM_TO_PX, 2), round(h * MM_TO_PX, 2)
+    body = ['<shape strokewidth="inherit" h="%g" w="%g" aspect="variable">' % (H, W),
+            '<foreground><path>']
+    for n, (x, y) in enumerate(pts):
+        body.append('<%s x="%.2f" y="%.2f"/>'
+                    % ('move' if n == 0 else 'line',
+                       (x - x0) * MM_TO_PX, (y - y0) * MM_TO_PX))
+    body += ['<close/></path><fillstroke/></foreground></shape>']
+    raw = zlib.compressobj(9, zlib.DEFLATED, -15)
+    data = raw.compress(''.join(body).encode('utf-8')) + raw.flush()
+    return 'shape=stencil(%s)' % base64.b64encode(data).decode('ascii')
 
 
 def bbox(pts):
@@ -596,7 +635,7 @@ class Converter:
             return 'rhombus'
         if sid in self.curvy:
             return 'ellipse'
-        return 'edge'
+        return 'polygon'
 
     def add_text_cell(self, cid, tinfo):
         """文字だけのセルを、文字自身の座標から作る。"""
@@ -632,6 +671,49 @@ class Converter:
                        (x0, y0, x1 - x0, y1 - y0),
                        base + ['html=1'] + self.paint(bodies) + ['whiteSpace=nowrap'], '')
 
+    def add_closed(self, gid, pts, bodies, body):
+        """閉じた多角線を図形として出す。
+
+        菱形と軸に平行な矩形は draw.io の標準図形に、それ以外の多角形
+        (六角形のループ記号など) は形をそのまま保つステンシル図形にする。
+        線のまま出すと、文字が線の中点に置かれて枠からはみ出てしまう。
+        """
+        x0, y0, x1, y1 = bbox(pts)
+        geo = (x0, y0, x1 - x0, y1 - y0)
+        xs = {round(p[0], 3) for p in pts}
+        ys = {round(p[1], 3) for p in pts}
+        if is_rhombus(pts):
+            base = ['rhombus']
+        elif len(xs) <= 2 and len(ys) <= 2:
+            base = ['rounded=0']
+        else:
+            base = [stencil(pts)]
+        style = base + ['html=1'] + self.paint(bodies) + ['whiteSpace=nowrap']
+        label = ''
+        tinfo = self.group_text(body)
+        if tinfo:
+            html, plain, cls, tfill, tb, lcls = tinfo
+            fs, size = self.font_style(cls, tfill)
+            family = fs[1].split('=', 1)[1]
+            style += fs + self.label_style(plain, geo, tb, size, family)
+            style += ['overflow=visible']
+            label = self.line_label(html, tb, size, lcls)
+            self.stats['label'] += 1
+        self.add_shape(self.prefix + 'n%s' % gid, 'rect', geo, style, label)
+
+    def line_label(self, html, tb, size, lcls):
+        """行ごとの文字サイズを反映してラベル文字列を組み立てる。"""
+        for i, lc in enumerate(lcls):
+            lsize = self.fonts.get(lc, (size,))[0]
+            if abs(lsize - size) > 0.05:
+                html[i] = '<span style="font-size:%gpx">%s</span>' % (
+                    round(lsize * MM_TO_PX, 1), html[i])
+        label = '<br>'.join(html)
+        if len(html) > 1:
+            lh = (tb[2] - tb[1]) / (len(html) - 1) / size
+            label = '<div style="line-height:%.2f">%s</div>' % (lh, label)
+        return label
+
     def do_composite(self, gid, body):
         """表部品・グループ部品のように 1 部品が複数の図形を含む場合。
 
@@ -656,7 +738,11 @@ class Converter:
             n += 1
             cid = self.prefix + 'g%s_%d' % (gid, n)
             kind = self.shape_of(href, pts)
-            if kind == 'edge':
+            if kind == 'polygon':
+                self.add_shape(cid, 'rect', bbox_geo(pts),
+                               [stencil(pts), 'html=1'] + self.paint(groups[href]) +
+                               ['whiteSpace=nowrap'], '')
+            elif kind == 'edge':
                 paint = [p for p in self.paint(groups[href])
                          if not p.startswith('fillColor')]
                 self.cells.append({
@@ -763,11 +849,8 @@ class Converter:
         if not pts or len(pts) < 2:
             self.stats['skipped'] += 1
             return
-        if is_rhombus(pts):                   # 閉じた菱形 = フローチャートの判断
-            self.add_polygon(self.prefix + 'n%s' % gid, 'rhombus', pts, bodies)
-            tinfo = self.group_text(body)
-            if tinfo:
-                self.add_text_cell(self.prefix + 't%s' % gid, tinfo)
+        if is_closed(pts):                    # 閉じた多角線は線ではなく図形
+            self.add_closed(gid, pts, bodies, body)
             return
         stroke, _ = color(bodies[0].get('stroke'))
         sw = float(bodies[0].get('stroke-width', 0.25))
