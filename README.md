@@ -155,7 +155,9 @@ converter recovers the offset by **voting over pairs whose aspect ratios agree**
 to say which sheet an SVG came from.
 
 Equation sizes use **one base size for the whole document, shrunk only for the equations that would
-not fit** their bounding rectangle. The base size is the median of the largest size that fits each
+not fit** their bounding rectangle. Because the typesetting estimate has some error, equations are
+laid out at 0.8 of the rectangle by default (measured over 1762 equations, that leaves 1.6%
+overflowing; use `--eq-margin 0.9` if you prefer them larger). The base size is the median of the largest size that fits each
 equation (the typesetting-size estimator was fitted against MathJax measurements of 88 equations).
 
 ### Converting many files at once
@@ -236,6 +238,7 @@ They sit at the top of `svg2drawio.py`.
 
 | Constant | Default | Meaning |
 |---|---|---|
+| `EQ_MARGIN` | `0.8` | Fraction of the rectangle an equation is fitted into (`--eq-margin`) |
 | `SNAP_TOL` | `0.7` | How close (mm) a line endpoint must be to a shape to be attached to it |
 | `SMALL_SHAPE` | `4.0` | Shapes smaller than this (mm) also accept endpoints that stop inside them |
 | `OLE_MM` | `4.5` | Short side of an OLE part (mm); overridden by `--ole-size` |

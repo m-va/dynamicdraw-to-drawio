@@ -30,7 +30,7 @@ SMALL_SHAPE = 4.0               # これ以下の図形は内側で終わる線�
 OLE_MM = 4.5                    # OLE 部品 (数式など) の短辺の長さ (mm) -> --ole-size
 OLE_LATEX = {}                  # {部品ID: LaTeX} -> --ole-latex で読み込む
 OLE_FONT = None                 # 数式の文字サイズ (px)。None なら実寸から決める
-EQ_MARGIN = 0.9                 # 数式が枠からはみ出さないための余裕
+EQ_MARGIN = 0.8                 # 数式が枠からはみ出さないための余裕 -> --eq-margin
 FONT_MAP = {
     'ＭＳ ゴシック': 'MS Gothic',
     'ＭＳ Ｐゴシック': 'MS PGothic',
@@ -1029,6 +1029,7 @@ def report(st, indent='  '):
 def main():
     global OLE_MM
     global OLE_FONT
+    global EQ_MARGIN
     global OLE_LATEX
     ap = argparse.ArgumentParser(
         description='Dynamic Draw の SVG を draw.io 形式に変換する',
@@ -1042,6 +1043,9 @@ def main():
     ap.add_argument('--ole-size', type=float, default=OLE_MM, metavar='MM',
                     help='OLE 部品 (数式など) の短辺の長さ (mm, 既定 %(default)s)。'
                          'mdpf から実寸が読めた場合はそちらを使う')
+    ap.add_argument('--eq-margin', type=float, default=EQ_MARGIN, metavar='率',
+                    help='数式の大きさの余裕 (既定 %(default)s)。小さくするほど枠に対して'
+                         '小さく組み、はみ出しにくくなる')
     ap.add_argument('--ole-font', type=float, metavar='PX',
                     help='数式の文字サイズ (px)。既定は数式の高さから逆算')
     ap.add_argument('--dump-ole', metavar='DIR',
@@ -1051,6 +1055,7 @@ def main():
     args = ap.parse_args()
     OLE_MM = args.ole_size
     OLE_FONT = args.ole_font
+    EQ_MARGIN = args.eq_margin
     if args.ole_latex:
         OLE_LATEX.update(load_latex_map(args.ole_latex))
 
