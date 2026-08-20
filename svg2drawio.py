@@ -56,6 +56,8 @@ SYMBOL_MAP = {
 # 部品名 -> 種類。Dynamic Draw は UI 言語ごとにコメントの部品名が変わるので、
 # 日本語と英語のどちらでも拾えるようにしておく (未知の名前は形から推定する)
 PART_KINDS = (
+    (('丸角', 'round'), 'round'),
+    (('表部品', 'グループ', 'table', 'group'), 'composite'),
     (('矩形', 'rect', 'box', 'square'), 'rect'),
     (('円弧', '楕円', 'arc', 'circle', 'ellipse', 'oval'), 'ellipse'),
     (('多角線', '直線', '曲線', 'poly', 'line', 'curve', 'connector'), 'edge'),
@@ -236,8 +238,22 @@ def parse_path(d):
     return pts
 
 
+def off_line(p, a, b):
+    """線分 a-b から点 p までの距離。"""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    if length < 1e-9:
+        return math.hypot(p[0] - a[0], p[1] - a[1])
+    return abs(dx * (a[1] - p[1]) - dy * (a[0] - p[0])) / length
+
+
 def is_curved(d):
-    """cp1 が始点・cp2 が終点と一致しない = 実際のベジェ曲線かどうか。"""
+    """本当に曲がっているか。
+
+    Dynamic Draw は直線も 3 次ベジェで書き、制御点を線分上の 15%/85% などに
+    置くことがある。制御点が線分上に乗っていれば見た目は直線なので、
+    「制御点が線分から離れているか」で判定する。
+    """
     toks = re.findall(r'[MC]|' + NUM.pattern, d)
     prev, i = None, 0
     while i < len(toks):
@@ -245,13 +261,27 @@ def is_curved(d):
             prev = (float(toks[i + 1]), float(toks[i + 2])); i += 3
         elif toks[i] == 'C':
             n = [float(x) for x in toks[i + 1:i + 7]]
-            if prev and (abs(n[0] - prev[0]) > 1e-3 or abs(n[1] - prev[1]) > 1e-3 or
-                         abs(n[2] - n[4]) > 1e-3 or abs(n[3] - n[5]) > 1e-3):
+            end = (n[4], n[5])
+            if prev and (off_line((n[0], n[1]), prev, end) > 0.05 or
+                         off_line((n[2], n[3]), prev, end) > 0.05):
                 return True
-            prev = (n[4], n[5]); i += 7
+            prev = end; i += 7
         else:
             i += 1
     return False
+
+
+def is_rhombus(pts):
+    """閉じた 4 点が外接矩形の各辺の中点にあるか (= 菱形)。"""
+    p = pts[:-1] if len(pts) == 5 else pts
+    if len(p) != 4:
+        return False
+    x0, y0, x1, y1 = bbox(p)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    tol = max(x1 - x0, y1 - y0) * 0.06 + 0.05
+    mids = [(cx, y0), (x1, cy), (cx, y1), (x0, cy)]
+    return all(any(abs(a[0] - b[0]) < tol and abs(a[1] - b[1]) < tol for b in mids)
+               for a in p)
 
 
 def bbox(pts):
@@ -406,8 +436,15 @@ class Converter:
             y = float(node.get('y', y))
             cls = node.get('class', cls)
             fill = node.get('fill', fill)
-            sup = sup or node.get('baseline-shift') is not None or \
-                node.get('font-size', '').endswith('%')
+            # 上下付きは「文字を小さくして基線をずらす」形で書かれる。
+            # 基線ずらしだけの指定は、菱形の中の文字を上下中央に置くといった
+            # 位置合わせなので、上下付きとしては扱わない。
+            if node.get('font-size', '').endswith('%'):
+                shift = node.get('baseline-shift')
+                try:
+                    sup = 'sub' if shift is not None and float(shift) < 0 else 'sup'
+                except ValueError:
+                    sup = 'sub' if 'sub' in shift else 'sup'
             if node.text:
                 runs.append((y, x, node.text, cls, fill, sup))
             for child in node:
@@ -415,7 +452,7 @@ class Converter:
                 if child.tail:
                     runs.append((y, x, child.tail, cls, fill, sup))
 
-        walk(el, 0.0, 0.0, el.get('class', 'sfont-1'), el.get('fill', '#000000ff'), False)
+        walk(el, 0.0, 0.0, el.get('class', 'sfont-1'), el.get('fill', '#000000ff'), None)
         chunks = []
         for y, x, txt, cls, fill, sup in runs:
             sym = self.is_symbol(cls)
@@ -424,15 +461,28 @@ class Converter:
             html = escape(txt)
             if sym:   # 和文フォントだと μ などが全角になるので欧文フォントを指定
                 html = '<span style="font-family:Arial,Helvetica,sans-serif">%s</span>' % html
-            if sup:
-                html = '<sup>%s</sup>' % html
+            piece = (html, sup)
             if chunks and abs(chunks[-1][0] - y) < 0.05:
-                y0, x0, h0, p0, c0, f0 = chunks[-1]
-                chunks[-1] = (y0, x0, h0 + html, p0 + txt,
+                y0, x0, ps, p0, c0, f0 = chunks[-1]
+                chunks[-1] = (y0, x0, ps + [piece], p0 + txt,
                               cls if self.is_symbol(c0) else c0, f0)
             else:
-                chunks.append((y, x, html, txt, cls, fill))
+                chunks.append((y, x, [piece], txt, cls, fill))
         return chunks
+
+    @staticmethod
+    def line_html(pieces):
+        """1 行分の断片を HTML にする。
+
+        Dynamic Draw は上下付きを「文字を小さくして基線をずらす」形で書くが、
+        行全体が同じ指定のこともある (菱形の中の文字など)。その場合は
+        上下付きではなく、単にその行が小さいだけなので分けて扱う。
+        """
+        if pieces and all(sup for _h, sup in pieces):
+            return '<span style="font-size:65%%">%s</span>' % (
+                ''.join(h for h, _s in pieces))
+        return ''.join('<%s>%s</%s>' % (sup, h, sup) if sup else h
+                       for h, sup in pieces)
 
     def group_text(self, body):
         """グループ内の文字を行にまとめる。
@@ -443,19 +493,20 @@ class Converter:
         if not chunks:
             return None
         chunks.sort(key=lambda c: (round(c[0], 2), c[1]))
-        html, plain, ys, xs, lcls = [], [], [], [], []
-        for y, x, h, p, cls, fill in chunks:
+        lines, plain, ys, xs, lcls = [], [], [], [], []
+        for y, x, pieces, p, cls, fill in chunks:
             if ys and abs(ys[-1] - y) < 0.05:
-                html[-1] += h
+                lines[-1] += pieces
                 plain[-1] += p
                 if self.is_symbol(lcls[-1]):
                     lcls[-1] = cls
             else:
-                html.append(h)
+                lines.append(list(pieces))
                 plain.append(p)
                 ys.append(y)
                 xs.append(x)
                 lcls.append(cls)
+        html = [self.line_html(pieces) for pieces in lines]
         cls = next((c[4] for c in chunks if not self.is_symbol(c[4])), chunks[0][4])
         return html, plain, cls, chunks[0][5], (min(xs), ys[0], ys[-1], xs), lcls
 
@@ -508,6 +559,120 @@ class Converter:
         self.stats[kind] += 1
 
     # -- 部品ごとの変換
+    def paint(self, bodies):
+        """同じ図形に対する複数の <use> (塗り用と線用) をまとめる。"""
+        fill, fill_op = 'none', 100
+        stroke, sw, dash = 'none', None, None
+        for u in bodies:
+            f, fo = color(u.get('fill'))
+            if f != 'none':
+                fill, fill_op = f, fo
+            st, _ = color(u.get('stroke'))
+            if st != 'none':
+                stroke = st
+                sw = float(u.get('stroke-width', 0.25))
+                dash = u.get('stroke-dasharray')
+        style = ['fillColor=' + fill]
+        if fill != 'none' and fill_op < 100:
+            style.append('opacity=%d' % fill_op)
+        style.append('strokeColor=' + stroke)
+        if sw:
+            style.append('strokeWidth=%g' % round(sw * MM_TO_PX, 2))
+        if dash:
+            style += dash_style(dash, sw)
+        return style
+
+    def shape_of(self, sid, pts):
+        """閉じているか・角が軸に平行か・曲線かで図形の種類を決める。"""
+        closed = (len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 1e-6
+                  and abs(pts[0][1] - pts[-1][1]) < 1e-6)
+        if not closed:
+            return 'edge'
+        xs = {round(p[0], 3) for p in pts}
+        ys = {round(p[1], 3) for p in pts}
+        if len(xs) <= 2 and len(ys) <= 2:
+            return 'rect'
+        if is_rhombus(pts):
+            return 'rhombus'
+        if sid in self.curvy:
+            return 'ellipse'
+        return 'edge'
+
+    def add_text_cell(self, cid, tinfo):
+        """文字だけのセルを、文字自身の座標から作る。"""
+        html, plain, cls, tfill, tb, lcls = tinfo
+        fs, size = self.font_style(cls, tfill)
+        family = fs[1].split('=', 1)[1]
+        for i, lc in enumerate(lcls):
+            lsize = self.fonts.get(lc, (size,))[0]
+            if abs(lsize - size) > 0.05:
+                html[i] = '<span style="font-size:%gpx">%s</span>' % (
+                    round(lsize * MM_TO_PX, 1), html[i])
+        label = '<br>'.join(html)
+        if len(html) > 1:
+            lh = (tb[2] - tb[1]) / (len(html) - 1) / size
+            label = '<div style="line-height:%.2f">%s</div>' % (lh, label)
+        _xmin, ytop, ybot, _xs = tb
+        how, ref, est = self.text_align(plain, tb, size, family)
+        tx = {'left': ref, 'center': ref - est / 2, 'right': ref - est}[how]
+        style = ['text', 'html=1', 'fillColor=none', 'strokeColor=none',
+                 'whiteSpace=nowrap', 'overflow=visible', 'spacing=0',
+                 'spacingTop=0', 'spacingLeft=0', 'spacingRight=0',
+                 'align=' + how, 'verticalAlign=middle'] + fs
+        self.add_shape(cid, 'text', (tx, ytop - size * 0.85, est,
+                                     (ybot - ytop) + size * 1.15),
+                       style, label, is_shape=False)
+
+    def add_polygon(self, cid, kind, pts, bodies):
+        """閉じた図形 (矩形・菱形・楕円) を 1 つ出力する。"""
+        x0, y0, x1, y1 = bbox(pts)
+        base = {'rect': ['rounded=0'], 'round': ['rounded=1'],
+                'rhombus': ['rhombus'], 'ellipse': ['ellipse']}[kind]
+        self.add_shape(cid, 'ellipse' if kind == 'ellipse' else 'rect',
+                       (x0, y0, x1 - x0, y1 - y0),
+                       base + ['html=1'] + self.paint(bodies) + ['whiteSpace=nowrap'], '')
+
+    def do_composite(self, gid, body):
+        """表部品・グループ部品のように 1 部品が複数の図形を含む場合。
+
+        中の図形を 1 つずつ取り出して矩形・楕円・線として出力する。
+        まとめて 1 つの図形として扱うと、表の枠線やセルが失われてしまう。
+        """
+        uses = [attrs(u) for u in re.findall(r'<use\b[^>]*>', body)]
+        order, groups = [], {}
+        for u in uses:
+            href = u.get('href', '').lstrip('#')
+            if 'Body' not in href or href not in self.symbols:
+                continue
+            if href not in groups:
+                groups[href] = []
+                order.append(href)
+            groups[href].append(u)
+        n = 0
+        for href in order:
+            pts = self.symbols[href]
+            if len(pts) < 2:
+                continue
+            n += 1
+            cid = self.prefix + 'g%s_%d' % (gid, n)
+            kind = self.shape_of(href, pts)
+            if kind == 'edge':
+                paint = [p for p in self.paint(groups[href])
+                         if not p.startswith('fillColor')]
+                self.cells.append({
+                    'id': cid, 'value': '', 'edge': True,
+                    'style': ';'.join(['edgeStyle=none', 'html=1', 'rounded=0'] +
+                                      paint + ['startArrow=none', 'endArrow=none']),
+                    'src': pts[0], 'tgt': pts[-1], 'pts': pts[1:-1]})
+                self.stats['edge'] += 1
+            else:
+                self.add_polygon(cid, kind, pts, groups[href])
+        tinfo = self.group_text(body)
+        if tinfo:
+            self.add_text_cell(self.prefix + 't%s' % gid, tinfo)
+        elif not n:
+            self.stats['skipped'] += 1
+
     def do_vertex(self, gid, kind, body):
         uses = [attrs(u) for u in re.findall(r'<use\b[^>]*>', body)]
         bodies = [u for u in uses if 'Body' in u.get('href', '')]
@@ -535,7 +700,8 @@ class Converter:
                 sw = float(u.get('stroke-width', 0.25))
                 dash = u.get('stroke-dasharray')
 
-        style = ['rounded=0'] if kind == 'rect' else ['ellipse']
+        style = {'rect': ['rounded=0'], 'round': ['rounded=1'],
+                 'ellipse': ['ellipse']}.get(kind, ['rounded=0'])
         style.append('html=1')
         style.append('fillColor=' + fill)
         if fill != 'none' and fill_op < 100:
@@ -583,7 +749,8 @@ class Converter:
             self.stats['label'] -= 1
             self.add_shape(self.prefix + 't%s' % gid, 'text', geo, style, label, is_shape=False)
             return
-        self.add_shape(self.prefix + 'n%s' % gid, kind, geo, style, label)
+        self.add_shape(self.prefix + 'n%s' % gid,
+                       'rect' if kind == 'round' else kind, geo, style, label)
 
     def do_edge(self, gid, body):
         uses = [attrs(u) for u in re.findall(r'<use\b[^>]*>', body)]
@@ -595,6 +762,12 @@ class Converter:
         pts = self.symbols.get(bid)
         if not pts or len(pts) < 2:
             self.stats['skipped'] += 1
+            return
+        if is_rhombus(pts):                   # 閉じた菱形 = フローチャートの判断
+            self.add_polygon(self.prefix + 'n%s' % gid, 'rhombus', pts, bodies)
+            tinfo = self.group_text(body)
+            if tinfo:
+                self.add_text_cell(self.prefix + 't%s' % gid, tinfo)
             return
         stroke, _ = color(bodies[0].get('stroke'))
         sw = float(bodies[0].get('stroke-width', 0.25))
@@ -834,7 +1007,9 @@ class Converter:
                 kind = self.kind_from_shape(body)
                 if kind:
                     self.stats['guessed'] += 1
-            if kind == 'rect' or kind == 'ellipse':
+            if kind == 'composite':
+                self.do_composite(gid, body)
+            elif kind in ('rect', 'ellipse', 'round'):
                 self.do_vertex(gid, kind, body)
             elif kind == 'edge':
                 self.do_edge(gid, body)

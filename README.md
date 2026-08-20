@@ -105,7 +105,10 @@ pip install pillow
 |---|---|
 | Rectangle (with an outline) | Rectangle shape, reproducing fill, stroke colour, width and dash pattern |
 | Rectangle (no outline — text only) | Text shape, positioned from the actual glyph coordinates |
+| Rounded rectangle | Rounded rectangle shape |
 | Arc | Ellipse shape |
+| Table / group part | Expanded into its individual rectangles, ellipses and lines |
+| Closed diamond polyline | Rhombus shape (flowchart decision) |
 | Polyline | **Connector**, with bend points (waypoints), arrowheads and curves |
 | OLE part (equations etc.) | Embedded image, or `$$...$$` math text with `--ole-latex` |
 | Text inside a part | Label of that shape, matching the original alignment and line spacing |
