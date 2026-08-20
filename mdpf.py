@@ -50,6 +50,11 @@ SYMBOLS = {
     0x2203: r'\exists', 0x00b7: r'\cdot', 0x22c5: r'\cdot', 0x2032: "'",
     0x2026: r'\dots', 0x00b0: r'^{\circ}', 0x2220: r'\angle', 0x223c: r'\sim',
     0x2245: r'\cong', 0x221d: r'\propto', 0x22a5: r'\perp', 0x2225: r'\parallel',
+    0x03c2: '\\varsigma', 0x2113: '\\ell',
+    0x03d1: '\\vartheta', 0x03d5: '\\phi',
+    0x03d6: '\\varpi', 0x03f5: '\\epsilon',
+    0x2299: '\\odot', 0x2295: '\\oplus',
+    0x2297: '\\otimes', 0x2213: '\\mp',
     0x2212: '-', 0x2010: '-', 0x2013: '-', 0x00a0: r'\,',
     # MathType は空白を MT Extra フォントの私用領域の文字で表す
     0xeb01: r'\,', 0xeb02: r'\;', 0xeb03: r'\quad ', 0xeb04: r'\qquad ',
@@ -68,6 +73,17 @@ FENCES = {
 
 
 FRAC_CMD = chr(92) + 'frac'
+
+# 文字に付く装飾。コードの意味は元図の画像と突き合わせて確認した
+# (2=ドット, 3=二重ドット, 5=プライム, 8=チルダ, 9=ハット, 17=オーバーバー)
+_BS = chr(92)
+EMBELLISH = {
+    2: _BS + 'dot{%s}', 3: _BS + 'ddot{%s}', 4: _BS + 'dddot{%s}',
+    5: "%s'", 6: "%s''", 7: "%s'''",
+    8: _BS + 'tilde{%s}', 9: _BS + 'hat{%s}',
+    10: _BS + 'vec{%s}', 11: _BS + 'overleftarrow{%s}',
+    17: _BS + 'bar{%s}', 18: _BS + 'overline{%s}',
+}
 
 
 class Unsupported(Exception):
@@ -201,7 +217,7 @@ class Mtef:
                 break
             if opt & 0x8:
                 self.nudge()
-            out.append(self.byte())
+            out.append(self.word())     # 装飾コードは 16bit
         return out
 
     # -- 変換
@@ -214,20 +230,8 @@ class Mtef:
             self.ok = False
             s = '?'
         for e in embell:
-            if e in (2, 3):             # プライム
-                s += "'"
-            elif e == 5:
-                s = r'\bar{%s}' % s
-            elif e == 6:
-                s = r'\vec{%s}' % s
-            elif e == 8:
-                s = r'\dot{%s}' % s
-            elif e == 9:
-                s = r'\ddot{%s}' % s
-            elif e == 11:
-                s = r'\hat{%s}' % s
-            elif e == 12:
-                s = r'\tilde{%s}' % s
+            if e in EMBELLISH:
+                s = EMBELLISH[e] % s
             else:
                 self.ok = False
         return s
